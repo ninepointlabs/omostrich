@@ -1,0 +1,12 @@
+[Unit]
+Description=Omarchy Nostr signer daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/mise/shims/node %h/Projects/omarchy-nostr-signer/src/daemon.mjs
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
