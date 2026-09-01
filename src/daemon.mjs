@@ -182,6 +182,20 @@ async function unlockWith(passphrase) {
   log(`post-connect relay states (4s window): ${relayStates}`);
 
   backend = new NDKNip46Backend(ndk, signer, permitCallback, config.relays);
+  // NDKNip46Backend's default applyToken() throws "connection token not
+  // supported" whenever a connect request carries a secret/token param —
+  // and the NIP-46 spec's own bunker:// example includes an optional
+  // `secret`, which real clients (Amber, nsec.app, etc.) commonly send as
+  // anti-spoofing practice. Left at the default, every such client's first
+  // connect attempt gets an error response and never gets past "connecting"
+  // — proven with a throwaway-key smoke test against this exact backend
+  // before this fix (bunker URL with ?secret=... failed every time; without
+  // it, connect + sign_event round-tripped fine). We don't implement
+  // token-scoped permission grants, so accepting the token as a no-op (not
+  // validating it, not rejecting the connection because of it) is correct:
+  // the actual authorization decision still runs through permitCallback via
+  // pubkeyAllowed() right after this, same as every other method.
+  backend.applyToken = async () => {};
   await backend.start();
 
   touchActivity();
@@ -283,7 +297,22 @@ function status() {
     clients: config.clients,
     pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, createdAt: p.createdAt })),
     profile: profilePayload(),
+    bunkerUrl: bunkerUrl(),
   };
+}
+
+// Public connection string for NIP-46 clients (Amber, nsec.app, any
+// bunker://-capable app). No secret param: this daemon does not implement
+// token-scoped permission grants (see the applyToken no-op in
+// unlockWith()), so a secret would only give a false sense of
+// single-use auth without the daemon actually enforcing it. Every
+// connection still goes through the same approve/deny UX as any other
+// NIP-46 request, secret or not — that's the real authorization boundary.
+function bunkerUrl() {
+  if (!pubkeyHex) return "";
+  if (!Array.isArray(config.relays) || config.relays.length === 0) return "";
+  const relayParams = config.relays.map((r) => `relay=${encodeURIComponent(r)}`).join("&");
+  return `bunker://${pubkeyHex}?${relayParams}`;
 }
 
 async function signInternal(eventTemplate) {
