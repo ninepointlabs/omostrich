@@ -50,6 +50,7 @@ Panel {
   property var attachedBlob: null
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
   property bool settingsExpanded: false
+  property bool notificationsEnabled: true
 
   // --- Compose state ---------------------------------------------------
   property string draft: ""
@@ -96,7 +97,9 @@ Panel {
     var n = Array.isArray(root.relays) ? root.relays.length : 0
     var line = n + (n === 1 ? " relay" : " relays")
     var host = root.blossomHostOf(root.blossomUrl)
-    return host ? line + " · " + host : line
+    if (host) line = line + " · " + host
+    if (!root.notificationsEnabled) line = line + " · alerts off"
+    return line
   }
 
   function applyStatus(data) {
@@ -111,6 +114,7 @@ Panel {
     root.clients = data.clients || {}
     root.pendingList = data.pending || []
     root.profile = data.profile || null
+    if (typeof data.notificationsEnabled === "boolean") root.notificationsEnabled = data.notificationsEnabled
   }
 
   function refreshStatus() {
@@ -178,6 +182,17 @@ Panel {
         root.errorText = res.error
       }
     })
+  }
+
+  function setNotifications(enabled) {
+    runAction("set_notifications", { enabled: !!enabled }, function(res) {
+      if (res.ok) {
+        root.notificationsEnabled = !!(res.data && res.data.notificationsEnabled)
+        root.statusText = root.notificationsEnabled ? "Desktop alerts on." : "Desktop alerts off."
+      } else {
+        root.errorText = res.error
+      }
+    }, false)
   }
 
   function clearAttach() {
@@ -886,6 +901,18 @@ Panel {
                 foreground: root.foreground
                 bordered: true
                 onClicked: root.saveBlossom()
+              }
+
+              PanelSectionHeader { text: "ALERTS"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+              Toggle {
+                width: parent.width
+                label: "Desktop notifications"
+                description: "Mentions, DMs, and zaps. Off silences toasts."
+                checked: root.notificationsEnabled
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: root.setNotifications(!root.notificationsEnabled)
               }
             }
           }

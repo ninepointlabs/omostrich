@@ -6,6 +6,7 @@ const DEFAULTS = {
   autoLockMinutes: 15,
   clients: {},
   blossomUrl: "",
+  notificationsEnabled: true,
 };
 
 export function load() {
@@ -17,6 +18,7 @@ export function load() {
       autoLockMinutes: Number.isFinite(raw.autoLockMinutes) ? raw.autoLockMinutes : DEFAULTS.autoLockMinutes,
       clients: raw.clients && typeof raw.clients === "object" ? raw.clients : {},
       blossomUrl: typeof raw.blossomUrl === "string" ? raw.blossomUrl : DEFAULTS.blossomUrl,
+      notificationsEnabled: raw.notificationsEnabled !== false,
     };
   } catch {
     return { ...DEFAULTS };
