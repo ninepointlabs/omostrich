@@ -84,23 +84,7 @@ Panel {
     return v.length > 20 ? v.slice(0, 12) + "…" + v.slice(-6) : v
   }
 
-  function blossomHostOf(url) {
-    var s = String(url || "").trim()
-    if (!s) return ""
-    s = s.replace(/^https?:\/\//, "")
-    var slash = s.indexOf("/")
-    if (slash !== -1) s = s.slice(0, slash)
-    return s
-  }
-
-  readonly property string settingsSummary: {
-    var n = Array.isArray(root.relays) ? root.relays.length : 0
-    var line = n + (n === 1 ? " relay" : " relays")
-    var host = root.blossomHostOf(root.blossomUrl)
-    if (host) line = line + " · " + host
-    if (!root.notificationsEnabled) line = line + " · alerts off"
-    return line
-  }
+  readonly property string settingsSummary: "Settings"
 
   function applyStatus(data) {
     root.daemonReachable = true
