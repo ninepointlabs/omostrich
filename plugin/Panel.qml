@@ -48,6 +48,7 @@ Panel {
   property string attachPath: ""
   property var attachedBlob: null
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
+  property bool settingsExpanded: false
 
   // --- Compose state ---------------------------------------------------
   property string draft: ""
@@ -70,6 +71,22 @@ Panel {
   function shortKey(s) {
     var v = String(s || "")
     return v.length > 20 ? v.slice(0, 12) + "…" + v.slice(-6) : v
+  }
+
+  function blossomHostOf(url) {
+    var s = String(url || "").trim()
+    if (!s) return ""
+    s = s.replace(/^https?:\/\//, "")
+    var slash = s.indexOf("/")
+    if (slash !== -1) s = s.slice(0, slash)
+    return s
+  }
+
+  readonly property string settingsSummary: {
+    var n = Array.isArray(root.relays) ? root.relays.length : 0
+    var line = n + (n === 1 ? " relay" : " relays")
+    var host = root.blossomHostOf(root.blossomUrl)
+    return host ? line + " · " + host : line
   }
 
   function applyStatus(data) {
@@ -246,6 +263,8 @@ Panel {
       root.errorText = ""
       root.statusText = ""
       root.refreshStatus()
+    } else {
+      root.settingsExpanded = false
     }
   }
 
@@ -724,56 +743,80 @@ Panel {
             }
           }
 
-          // --- Unlocked: relays ----------------------------------------------
+          // --- Unlocked: relays / blossom, collapsed while composing ------
           Column {
             visible: root.vaultExists && !root.locked
             width: parent.width
             spacing: Style.space(8)
 
             PanelSeparator { foreground: root.foreground }
-            PanelSectionHeader { text: "RELAYS"; foreground: root.foreground; fontFamily: root.fontFamily }
 
-            TextField {
-              id: relaysField
+            MouseArea {
               width: parent.width
-              foreground: root.foreground
-              text: root.relaysText
-              onTextChanged: root.relaysText = text
+              height: settingsSummaryText.height
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.settingsExpanded = !root.settingsExpanded
+
+              Text {
+                id: settingsSummaryText
+                width: parent.width
+                text: root.settingsSummary
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
             }
 
-            Button {
-              text: "Save relays"
-              foreground: root.foreground
-              bordered: true
-              onClicked: root.saveRelays()
-            }
-
-            PanelSectionHeader { text: "BLOSSOM"; foreground: root.foreground; fontFamily: root.fontFamily }
-
-            Text {
+            Column {
+              visible: root.settingsExpanded
               width: parent.width
-              wrapMode: Text.WordWrap
-              text: "One media server for v1. Leave blank to disable uploads."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
+              spacing: Style.space(8)
 
-            TextField {
-              id: blossomField
-              width: parent.width
-              placeholderText: "https://blossom.example"
-              foreground: root.foreground
-              text: root.blossomText
-              onTextChanged: root.blossomText = text
-              Keys.onReturnPressed: root.saveBlossom()
-            }
+              PanelSectionHeader { text: "RELAYS"; foreground: root.foreground; fontFamily: root.fontFamily }
 
-            Button {
-              text: "Save blossom server"
-              foreground: root.foreground
-              bordered: true
-              onClicked: root.saveBlossom()
+              TextField {
+                id: relaysField
+                width: parent.width
+                foreground: root.foreground
+                text: root.relaysText
+                onTextChanged: root.relaysText = text
+              }
+
+              Button {
+                text: "Save relays"
+                foreground: root.foreground
+                bordered: true
+                onClicked: root.saveRelays()
+              }
+
+              PanelSectionHeader { text: "BLOSSOM"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+              Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "One media server for v1. Leave blank to disable uploads."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              TextField {
+                id: blossomField
+                width: parent.width
+                placeholderText: "https://blossom.example"
+                foreground: root.foreground
+                text: root.blossomText
+                onTextChanged: root.blossomText = text
+                Keys.onReturnPressed: root.saveBlossom()
+              }
+
+              Button {
+                text: "Save blossom server"
+                foreground: root.foreground
+                bordered: true
+                onClicked: root.saveBlossom()
+              }
             }
           }
         }
