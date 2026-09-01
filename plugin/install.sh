@@ -11,9 +11,9 @@ OLD_COMPOSE_TARGET="$HOME/.config/omarchy/plugins/nostr-compose"
 # per-file symlinks didn't reliably work either. Copying means re-running
 # this script is what deploys an edit — there is no live-symlink shortcut.
 mkdir -p "$TARGET"
-cp "$DIR"/*.qml "$DIR"/manifest.json "$TARGET/"
+cp "$DIR"/*.qml "$DIR"/*.png "$DIR"/manifest.json "$TARGET/"
 
-echo "Copied $DIR/*.{qml,json} -> $TARGET/"
+echo "Copied $DIR/*.{qml,png,json} -> $TARGET/"
 
 omarchy plugin validate "$DIR"
 
