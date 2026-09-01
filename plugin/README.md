@@ -6,7 +6,8 @@ approvals, manage authorized apps, and edit your relay list — all in one
 dropdown.
 
 This is desktop plumbing, not a Nostr client. There is no timeline, no
-replies, no zaps, no media, no feed of any kind.
+replies, no zaps, no feed of any kind. Image attach is Blossom upload
+only — the daemon PUTs the blob, the note gets a URL.
 
 ## Merge history
 
@@ -35,6 +36,10 @@ identity, no re-onboarding needed. `install.sh` here also retires the old
   NIP-46 (remote signing) request.
 - **Authorized apps** — see and revoke apps that were "always allow"'d.
 - **Relays** — edit the comma-separated relay list.
+- **Blossom** — one media server URL (same config.json as relays). Path
+  field or paste-from-clipboard (wl-paste, same as the Omarchy clipboard
+  plugin). Preview + URL; on post the daemon appends the URL to the kind-1
+  (imeta tag if the blob hash is known). Empty blossom URL = no upload.
 
 ## Dependencies
 
