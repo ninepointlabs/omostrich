@@ -353,18 +353,61 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            // Single-line TextField, matching the kit's only proven
-            // text-input component. Kind-1 notes are short by nature for
-            // this composer's v1 scope.
-            TextField {
+            // qs.Ui has no TextArea — only single-line TextField. Qt Quick
+            // Controls TextArea is the same primitive hey-calendar already
+            // uses for journal edit; chrome copied from qs.Ui.TextField
+            // (BorderSurface + controlSpec) so it doesn't look like a
+            // foreign widget. Grows with wrapped content up to
+            // composeMaxHeight, then the TextArea scrolls internally.
+            // Enter posts; Shift+Enter inserts a newline.
+            TextArea {
               id: draftField
               width: parent.width
+              wrapMode: TextArea.Wrap
               placeholderText: "What's happening?"
-              foreground: root.foreground
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              selectionColor: Style.selectionFillFor(root.foreground, Color.accent)
+              selectedTextColor: root.foreground
+              placeholderTextColor: Qt.darker(root.foreground, 1.6)
+              selectByMouse: true
               enabled: !root.busy
               text: root.draft
               onTextChanged: root.draft = text
-              Keys.onReturnPressed: root.post()
+
+              readonly property real composeMinHeight: Style.space(48)
+              readonly property real composeMaxHeight: Style.space(180)
+              readonly property bool _focused: activeFocus
+              readonly property bool _hot: hovered
+              readonly property var _borderSpec: Border.controlSpec(_focused ? "focus" : (_hot ? "hover-cursor" : "normal"), root.foreground, Color.accent)
+
+              leftPadding: Style.spacing.controlPaddingX + Border.left(_borderSpec)
+              rightPadding: Style.spacing.controlPaddingX + Border.right(_borderSpec)
+              topPadding: Style.spacing.inputPaddingY + Border.top(_borderSpec)
+              bottomPadding: Style.spacing.inputPaddingY + Border.bottom(_borderSpec)
+
+              height: {
+                var wanted = contentHeight + topPadding + bottomPadding
+                return Math.min(composeMaxHeight, Math.max(composeMinHeight, wanted))
+              }
+
+              background: BorderSurface {
+                color: Style.controlFill(draftField._focused, draftField._hot, root.foreground, Color.accent)
+                borderSpec: draftField._borderSpec
+                radius: Style.cornerRadius
+              }
+
+              Keys.onPressed: (event) => {
+                if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter)
+                  return
+                if (event.modifiers & Qt.ShiftModifier) {
+                  event.accepted = false
+                  return
+                }
+                event.accepted = true
+                root.post()
+              }
             }
 
             Row {

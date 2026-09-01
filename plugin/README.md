@@ -24,10 +24,11 @@ identity, no re-onboarding needed. `install.sh` here also retires the old
 - **Bar icon** — a padlock mark; open/closed reflects locked state, dims
   when the signer daemon is unreachable, and shows a small red badge with a
   count when NIP-46 approval requests are pending.
-- **Compose** (shown once unlocked, at the top of the dropdown) — a
-  single-line field. Enter (or the Post button) posts a kind-1 text note by
-  calling the signer's `publish` command, which signs and broadcasts to
-  every configured relay and reports back per-relay success/failure.
+- **Compose** (shown once unlocked, at the top of the dropdown) — a wrapping
+  field that grows with the note. Enter (or the Post button) posts a kind-1
+  text note; Shift+Enter inserts a newline. Calls the signer's `publish`
+  command, which signs and broadcasts to every configured relay and reports
+  back per-relay success/failure.
 - **Lock / unlock / import** — the original signer setup and unlock flow,
   unchanged.
 - **Pending requests** — approve once, always allow, or deny an incoming
@@ -103,7 +104,9 @@ Built against the same Omarchy shell plugin contract as `omarchy-hermes-chat`
 — `PluginRegistry.qml` for the manifest schema, and the `qs.Ui` base
 components (`Panel`, `KeyboardPanel`, `BarIconButton`, `Button`, `TextField`,
 `PanelHero`, `PanelSectionHeader`, `PanelSeparator`) those sibling plugins
-already use. The pending-count badge on the bar icon reuses the same
+already use. Compose uses Qt Quick Controls `TextArea` (qs.Ui has no
+multi-line field; same primitive as hey-calendar's journal editor) with
+qs.Ui.TextField chrome. The pending-count badge on the bar icon reuses the same
 small-badge-dot pattern as `TailscaleIcon.qml`'s warning indicator
 (`/usr/share/omarchy/shell/plugins/panels/tailscale/TailscaleIcon.qml`) —
 `BorderSurface` circle anchored to a corner, deliberately not a novel
