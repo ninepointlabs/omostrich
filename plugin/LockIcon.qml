@@ -1,18 +1,27 @@
 import QtQuick
+import QtQuick.Effects
 import qs.Commons
+import qs.Ui
 
-// Custom-drawn padlock mark instead of a font glyph. The Nerd Font md-lock /
-// md-lock_open codepoints (verified color-table-free with fontTools) still
-// render with stray color fringing in this bar's tiny icon slot — some part
-// of the Qt/Wayland text-rendering path outside the font file itself is
-// responsible, and it wasn't worth chasing further. Drawing the mark from
-// plain Rectangles sidesteps font/glyph rendering entirely, the same
-// approach TailscaleIcon.qml already uses for the same reason.
+// Bar icon for the Nostr widget: the ostrich silhouette Tim supplied,
+// recolored to match the bar's current foreground/locked-state color via
+// MultiEffect colorization — the same technique Tray.qml's TrayIcon
+// component uses to recolor symbolic tray icons, not a new pattern. A flat
+// `Image` alone would just show whatever raster color the PNG has baked in
+// (black) regardless of theme or locked state; colorization lets this icon
+// keep behaving like the rest of the bar's icons, which all follow
+// root.barIconColor (dim when locked, urgent-colored when the daemon is
+// unreachable).
+//
+// Previously a hand-drawn padlock (LockIcon's original name/shape); kept
+// the file/component name LockIcon to avoid touching every reference site
+// in Panel.qml, but the drawing itself is now this silhouette.
 //
 // pendingCount adds a small numeric badge (same visual pattern as
 // TailscaleIcon.qml's warning badge) for outstanding NIP-46 approval
 // requests, so the merged Nostr widget can surface "something needs your
-// attention" without opening the dropdown.
+// attention" without opening the dropdown. Unchanged from the padlock
+// version.
 Item {
   id: root
 
@@ -27,47 +36,26 @@ Item {
   implicitWidth: iconSize
   implicitHeight: iconSize
 
-  readonly property real strokeWidth: Math.max(1.4, iconSize * 0.11)
-  readonly property real shackleSize: iconSize * 0.58
-  readonly property real bodyWidth: iconSize * 0.86
-  readonly property real bodyHeight: iconSize * 0.5
-
-  Item {
-    id: shackleClip
-    width: root.shackleSize
-    height: root.shackleSize / 2 + root.strokeWidth / 2
-    clip: true
-    anchors.horizontalCenter: parent.horizontalCenter
-    y: root.iconSize * 0.03
-    transformOrigin: Item.BottomRight
-    rotation: root.locked ? 0 : -32
-
-    Rectangle {
-      width: root.shackleSize
-      height: root.shackleSize
-      radius: width / 2
-      color: "transparent"
-      border.width: root.strokeWidth
-      border.color: root.color
-    }
+  Image {
+    id: silhouette
+    anchors.fill: parent
+    fillMode: Image.PreserveAspectFit
+    smooth: true
+    // Decode at physical pixels so the icon stays crisp on HiDPI displays
+    // instead of upscaling a smaller raster — same reasoning Tray.qml uses
+    // for its own icons.
+    sourceSize.width: Math.round(root.iconSize * Screen.devicePixelRatio)
+    sourceSize.height: Math.round(root.iconSize * Screen.devicePixelRatio)
+    source: "ostrich.png"
+    visible: false
+    layer.enabled: true
   }
 
-  Rectangle {
-    width: root.bodyWidth
-    height: root.bodyHeight
-    radius: Math.min(width, height) * 0.22
-    color: root.color
-    anchors.horizontalCenter: parent.horizontalCenter
-    anchors.bottom: parent.bottom
-    anchors.bottomMargin: root.iconSize * 0.04
-
-    Rectangle {
-      width: Math.max(2, root.iconSize * 0.12)
-      height: width
-      radius: width / 2
-      color: Qt.darker(root.color, 2.6)
-      anchors.centerIn: parent
-    }
+  MultiEffect {
+    anchors.fill: silhouette
+    source: silhouette
+    colorization: 1.0
+    colorizationColor: root.color
   }
 
   BorderSurface {
