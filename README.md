@@ -42,7 +42,7 @@ daemon that panel talks to.
 
 ```bash
 npm install          # already done
-./install.sh          # symlinks + enables the systemd --user service
+./install.sh          # symlinks + enables the systemd --user service, plus the CLI symlink below
 ```
 
 Then open the "Nostr" bar icon (right section) and paste in an nsec plus a
@@ -50,6 +50,62 @@ passphrase. From then on the icon shows locked/unlocked state and a badge
 for pending approvals; click it to compose and post a note, unlock, lock,
 review pending requests, manage authorized apps, or edit the relay list
 and Blossom server.
+
+## Agent / MCP access
+
+Other agents (Hermes, Claude Code, Grok, etc.) can post a note the same
+way the plugin does — by shelling out to the control socket, never by
+holding a key. `install.sh` symlinks the CLI onto `PATH`:
+
+```bash
+omarchy-nostr-signer-ctl publish '{"content":"your note text"}'
+# or, if the symlink isn't installed yet / not on PATH:
+node ~/Projects/omarchy-nostr-signer/bin/ctl.mjs publish '{"content":"your note text"}'
+```
+
+Response is one line of JSON on stdout:
+
+```json
+{"ok":true,"data":{"event":{...},"publishedTo":["wss://..."],"failed":[]}}
+```
+
+or, if the vault is locked:
+
+```json
+{"ok":false,"error":"locked"}
+```
+
+or if the daemon isn't running at all:
+
+```json
+{"ok":false,"error":"daemon_not_running"}
+```
+
+**Rules every calling agent must follow — these are not enforced by the
+daemon, they're the deal for using this path at all:**
+
+- Only call `publish` when Tim has explicitly asked *that agent, in that
+  moment* to post *that* text. No auto-posting, no scheduled/cron posting,
+  no posting as a side effect of some other task.
+- If the response is `{"ok":false,"error":"locked"}`, tell Tim the vault
+  is locked and to unlock it from the Nostr bar icon. Do not attempt to
+  unlock it yourself — no agent has (or should ever construct) the
+  passphrase.
+- Never print, log, or otherwise surface an nsec. No agent should ever
+  hold one; this CLI/socket path exists specifically so none of them ever
+  need to.
+- `blossom` is optional in the payload (`{"content":"...","blossom":"https://..."}`)
+  if an image was already uploaded via `blossom_upload` — most agents
+  won't use this in v1, text is enough.
+
+No MCP server ships in this repo yet (v1 is CLI-first, per the "CLI-first
+is enough for v1" call) — the `@modelcontextprotocol/sdk` install was
+blocked in this environment by a package-scan timeout unrelated to the
+package itself. The command above is the whole contract: any agent that
+can shell out and parse one line of JSON can use it. A thin MCP stdio
+wrapper (`post_to_nostr(content)` -> this same `publish` call, nothing
+more) would be a trivial follow-up if a specific agent's tool-calling
+setup genuinely can't shell out.
 
 ## Operating it
 
