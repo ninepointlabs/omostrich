@@ -11,8 +11,10 @@ encrypted at rest, and signs on request:
   mobile client, Vega, etc. — can request signatures too, subject to
   approval.
 
-The panel lives at `~/.config/omarchy/plugins/nostr-signer/` (bar icon +
-dropdown, id `tim.nostr-signer`). This directory is the daemon it talks to.
+The panel lives at `plugin/` in this repo (bar icon + dropdown, id
+`tim.nostr-signer`), deployed to `~/.config/omarchy/plugins/nostr-signer/`
+via `plugin/install.sh`. This directory (the parent of `plugin/`) is the
+daemon that panel talks to.
 
 ## How it works
 
@@ -43,10 +45,10 @@ npm install          # already done
 ./install.sh          # symlinks + enables the systemd --user service
 ```
 
-Then open the "Nostr Signer" bar icon (right section) and paste in an nsec
-plus a passphrase. From then on the icon shows locked/unlocked state and a
-badge for pending approvals; click it to unlock, lock, review pending
-requests, manage authorized apps, or edit the relay list.
+Then open the "Nostr" bar icon (right section) and paste in an nsec plus a
+passphrase. From then on the icon shows locked/unlocked state and a badge
+for pending approvals; click it to compose and post a note, unlock, lock,
+review pending requests, manage authorized apps, or edit the relay list.
 
 ## Operating it
 
@@ -62,6 +64,6 @@ omarchy-nostr-signer-ctl status
   and unit-level control-socket behavior, but not yet exercised against a
   real remote NIP-46 client end-to-end — worth a smoke test (e.g. a
   `nostrconnect://` from a web client) before relying on it.
-- The originally requested "chat entry that posts to Nostr, polished by
-  Hermes" plugin is the next piece: it should call `sign_internal` on this
-  daemon's control socket rather than holding any key material itself.
+- Mentions/DMs/zaps as desktop notifications (a background watcher on your
+  pubkey) is a separate later step — not started, and intentionally not
+  bundled into this plugin's panel.
