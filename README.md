@@ -61,10 +61,10 @@ omarchy-nostr-signer-ctl status
 
 ## Not done yet
 
-- NIP-46 was validated against NDK's documented `permitCallback` contract
-  and unit-level control-socket behavior, but not yet exercised against a
-  real remote NIP-46 client end-to-end — worth a smoke test (e.g. a
-  `nostrconnect://` from a web client) before relying on it.
-- Mentions/DMs/zaps as desktop notifications (a background watcher on your
-  pubkey) is a separate later step — not started, and intentionally not
-  bundled into this plugin's panel.
+- NIP-46 has been proven end-to-end with real NDK client code
+  (`NDKNip46Signer.bunker()`) against this daemon's own backend, using
+  disposable keys — connect, sign_event, and switch_relays all
+  round-trip. Still not exercised against an actual third-party app
+  (Amber, nsec.app, etc.) on a real phone — worth doing once, but the
+  protocol-level blocker (see `applyToken` in `daemon.mjs`) is fixed
+  and the bunker URL is in the panel to paste into one.
