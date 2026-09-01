@@ -43,6 +43,11 @@ Panel {
   property string setupPassphraseConfirm: ""
   property string unlockPassphrase: ""
   property string relaysText: ""
+  property string blossomUrl: ""
+  property string blossomText: ""
+  property string attachPath: ""
+  property var attachedBlob: null
+  property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
 
   // --- Compose state ---------------------------------------------------
   property string draft: ""
@@ -51,7 +56,7 @@ Panel {
   // relays can and do accept longer notes, so this only warns, it never
   // blocks Post.
   readonly property int softLimit: 700
-  readonly property bool canPost: !root.locked && root.vaultExists && root.daemonReachable && !root.busy && root.draft.trim().length > 0
+  readonly property bool canPost: !root.locked && root.vaultExists && root.daemonReachable && !root.busy && (root.draft.trim().length > 0 || !!(root.attachedBlob && root.attachedBlob.url))
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -74,6 +79,8 @@ Panel {
     root.npub = data.npub || ""
     root.relays = data.relays || []
     if (!relaysField.activeFocus) root.relaysText = root.relays.join(", ")
+    root.blossomUrl = data.blossomUrl || ""
+    if (!blossomField.activeFocus) root.blossomText = root.blossomUrl
     root.clients = data.clients || {}
     root.pendingList = data.pending || []
   }
@@ -133,6 +140,42 @@ Panel {
     })
   }
 
+  function saveBlossom() {
+    runAction("set_blossom", { url: root.blossomText }, function(res) {
+      if (res.ok) {
+        root.blossomUrl = (res.data && res.data.blossomUrl) || ""
+        root.blossomText = root.blossomUrl
+        root.statusText = root.blossomUrl ? "Blossom server saved." : "Blossom server cleared."
+      } else {
+        root.errorText = res.error
+      }
+    })
+  }
+
+  function clearAttach() {
+    root.attachedBlob = null
+  }
+
+  function uploadFromPath(filePath) {
+    var p = String(filePath || "").trim()
+    if (!p) { root.errorText = "Pick a file path first."; return }
+    if (!root.blossomUrl) { root.errorText = "Set a Blossom server under settings below first."; return }
+    runAction("blossom_upload", { path: p }, function(res) {
+      if (res.ok && res.data && res.data.url) {
+        root.attachedBlob = res.data
+        root.statusText = "Uploaded. URL will be added to the note when you post."
+      } else {
+        root.errorText = describeBlossomError(res.error)
+      }
+    })
+  }
+
+  function pasteClipboardImage() {
+    if (!root.blossomUrl) { root.errorText = "Set a Blossom server under settings below first."; return }
+    pasteProcess.running = false
+    pasteProcess.running = true
+  }
+
   function approve(id, remember) {
     runAction("approve", { id: id, remember: remember, label: "Approved app" }, function(res) { root.refreshStatus() })
   }
@@ -148,10 +191,13 @@ Panel {
   // --- Compose actions ---------------------------------------------------
   function post() {
     var text = root.draft.trim()
-    if (!text || root.busy) return
+    if (root.busy) return
+    if (!text && !(root.attachedBlob && root.attachedBlob.url)) return
     root.errorText = ""
     root.statusText = ""
-    runAction("publish", { content: text }, function(res) {
+    var payload = { content: text }
+    if (root.attachedBlob && root.attachedBlob.url) payload.blossom = root.attachedBlob
+    runAction("publish", payload, function(res) {
       if (res.ok) {
         var okList = Array.isArray(res.data && res.data.publishedTo) ? res.data.publishedTo : []
         var failList = Array.isArray(res.data && res.data.failed) ? res.data.failed : []
@@ -159,6 +205,7 @@ Panel {
         var total = okCount + failList.length
         if (failList.length === 0) {
           root.draft = ""
+          root.attachedBlob = null
           root.statusText = "Posted to " + okCount + " relay" + (okCount === 1 ? "" : "s") + "."
         } else if (okCount === 0) {
           // Nothing succeeded — keep the draft so the user doesn't have to
@@ -166,12 +213,22 @@ Panel {
           root.errorText = "Posted to 0 of " + total + " relays. Check the signer log."
         } else {
           root.draft = ""
+          root.attachedBlob = null
           root.statusText = "Posted to " + okCount + " of " + total + " relays (" + failList.map(function(f) { return f.url }).join(", ") + " failed)."
         }
       } else {
         root.errorText = describePublishError(res.error)
       }
     })
+  }
+
+  function describeBlossomError(err) {
+    var s = String(err || "")
+    if (s === "locked") return "Signer is locked. Unlock it below first."
+    if (s === "no blossom server configured") return "Set a Blossom server under settings below first."
+    if (s.indexOf("file not readable") !== -1) return "Couldn't read that file."
+    if (s === "daemon_not_running") return "Signer daemon isn't running."
+    return s || "Upload failed."
   }
 
   function describePublishError(err) {
@@ -212,6 +269,19 @@ Panel {
       var cb = actionProcess.onDoneCallback
       actionProcess.onDoneCallback = null
       if (cb) cb(response)
+    }
+  }
+
+  // Kit has no FileDialog and no image clipboard API. Clipboard.qml already
+  // shells out to wl-paste for image/png; same here, write a temp file, then
+  // blossom_upload by path so the plugin never sees the nsec.
+  Process {
+    id: pasteProcess
+    running: false
+    command: ["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && (wl-paste --type image/png > \"$1\" || wl-paste --type image/jpeg > \"$1\") && test -s \"$1\"", "_", root.pastePath]
+    onExited: function(exitCode) {
+      if (exitCode === 0) root.uploadFromPath(root.pastePath)
+      else root.errorText = "No image on the clipboard (wl-paste found nothing)."
     }
   }
 
@@ -420,6 +490,80 @@ Panel {
               }
             }
 
+            Text {
+              visible: !root.blossomUrl
+              width: parent.width
+              wrapMode: Text.WordWrap
+              text: "Set a Blossom server under settings below to attach images."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Column {
+              visible: !!root.blossomUrl
+              width: parent.width
+              spacing: Style.space(6)
+
+              TextField {
+                width: parent.width
+                placeholderText: "Image path (no file picker in the kit)"
+                foreground: root.foreground
+                enabled: !root.busy
+                text: root.attachPath
+                onTextChanged: root.attachPath = text
+                Keys.onReturnPressed: root.uploadFromPath(root.attachPath)
+              }
+
+              Row {
+                spacing: Style.space(6)
+                Button {
+                  text: "Upload file"
+                  foreground: root.foreground
+                  bordered: true
+                  enabled: !root.busy && root.attachPath.trim().length > 0
+                  onClicked: root.uploadFromPath(root.attachPath)
+                }
+                Button {
+                  text: "Paste image"
+                  foreground: root.foreground
+                  bordered: true
+                  enabled: !root.busy
+                  onClicked: root.pasteClipboardImage()
+                }
+                Button {
+                  visible: !!(root.attachedBlob && root.attachedBlob.url)
+                  text: "Remove"
+                  foreground: root.urgent
+                  bordered: true
+                  onClicked: root.clearAttach()
+                }
+              }
+
+              Row {
+                visible: !!(root.attachedBlob && root.attachedBlob.url)
+                width: parent.width
+                spacing: Style.space(8)
+
+                Image {
+                  width: Style.space(48)
+                  height: Style.space(48)
+                  fillMode: Image.PreserveAspectFit
+                  source: (root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : ""
+                  asynchronous: true
+                }
+
+                Text {
+                  width: parent.width - Style.space(56)
+                  wrapMode: Text.WrapAnywhere
+                  text: (root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : ""
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+
             Button {
               text: root.busy ? "Posting…" : "Post"
               foreground: root.foreground
@@ -602,6 +746,34 @@ Panel {
               foreground: root.foreground
               bordered: true
               onClicked: root.saveRelays()
+            }
+
+            PanelSectionHeader { text: "BLOSSOM"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+            Text {
+              width: parent.width
+              wrapMode: Text.WordWrap
+              text: "One media server for v1. Leave blank to disable uploads."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            TextField {
+              id: blossomField
+              width: parent.width
+              placeholderText: "https://blossom.example"
+              foreground: root.foreground
+              text: root.blossomText
+              onTextChanged: root.blossomText = text
+              Keys.onReturnPressed: root.saveBlossom()
+            }
+
+            Button {
+              text: "Save blossom server"
+              foreground: root.foreground
+              bordered: true
+              onClicked: root.saveBlossom()
             }
           }
         }

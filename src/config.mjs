@@ -5,6 +5,7 @@ const DEFAULTS = {
   relays: ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"],
   autoLockMinutes: 15,
   clients: {},
+  blossomUrl: "",
 };
 
 export function load() {
@@ -15,6 +16,7 @@ export function load() {
       relays: Array.isArray(raw.relays) && raw.relays.length > 0 ? raw.relays : DEFAULTS.relays,
       autoLockMinutes: Number.isFinite(raw.autoLockMinutes) ? raw.autoLockMinutes : DEFAULTS.autoLockMinutes,
       clients: raw.clients && typeof raw.clients === "object" ? raw.clients : {},
+      blossomUrl: typeof raw.blossomUrl === "string" ? raw.blossomUrl : DEFAULTS.blossomUrl,
     };
   } catch {
     return { ...DEFAULTS };

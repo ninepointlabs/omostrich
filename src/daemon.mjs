@@ -4,6 +4,7 @@ import WS from "ws";
 import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
+import * as blossom from "./blossom.mjs";
 import { createControlServer } from "./control-socket.mjs";
 import { stateDir, logPath } from "./paths.mjs";
 
@@ -165,6 +166,7 @@ function status() {
     npub: npub || meta?.npub || null,
     pubkeyHex: pubkeyHex || meta?.pubkeyHex || null,
     relays: config.relays,
+    blossomUrl: config.blossomUrl || "",
     autoLockMinutes: config.autoLockMinutes,
     clients: config.clients,
     pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, createdAt: p.createdAt })),
@@ -207,17 +209,28 @@ async function signInternal(eventTemplate) {
 // user), but unlike sign_internal this leaves a permanent public record, so
 // it always logs a per-relay outcome regardless of that TODO's still-open
 // decision for sign_internal itself.
-async function publishNote(content) {
+async function publishNote(content, extra = {}) {
   if (!skBytes) throw new Error("locked");
   if (!ndk) throw new Error("not connected to relays");
-  const text = String(content ?? "").trim();
+  let text = String(content ?? "").trim();
+  const blob = extra && extra.blossom && extra.blossom.url ? extra.blossom : null;
+  if (blob && blob.url && !text.includes(blob.url)) {
+    text = text ? `${text}\n${blob.url}` : String(blob.url);
+  }
   if (!text) throw new Error("content required");
   if (!Array.isArray(config.relays) || config.relays.length === 0) throw new Error("no relays configured");
+
+  const tags = blob ? blossom.imetaTags({
+    url: blob.url,
+    sha256: blob.sha256,
+    mime: blob.mime,
+    size: blob.size,
+  }) : [];
 
   const signed = await signInternal({
     kind: 1,
     content: text,
-    tags: [],
+    tags,
     created_at: Math.floor(Date.now() / 1000),
   });
 
@@ -317,7 +330,26 @@ async function handleCommand(cmd, req) {
       return signInternal(req.event);
 
     case "publish":
-      return publishNote(req.content);
+      return publishNote(req.content, { blossom: req.blossom });
+
+    case "set_blossom": {
+      config.blossomUrl = blossom.normalizeBlossomUrl(req.url);
+      configStore.save(config);
+      return { blossomUrl: config.blossomUrl };
+    }
+
+    case "blossom_upload": {
+      const result = await blossom.uploadBlob({
+        ndk,
+        skBytes,
+        pubkeyHex,
+        blossomUrl: config.blossomUrl,
+        req,
+      });
+      touchActivity();
+      log(`blossom upload ${result.sha256} (${result.size} bytes) -> ${result.url}`);
+      return result;
+    }
 
     default:
       throw new Error(`unknown command: ${cmd}`);

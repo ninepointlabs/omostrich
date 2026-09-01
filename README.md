@@ -48,7 +48,8 @@ npm install          # already done
 Then open the "Nostr" bar icon (right section) and paste in an nsec plus a
 passphrase. From then on the icon shows locked/unlocked state and a badge
 for pending approvals; click it to compose and post a note, unlock, lock,
-review pending requests, manage authorized apps, or edit the relay list.
+review pending requests, manage authorized apps, or edit the relay list
+and Blossom server.
 
 ## Operating it
 
