@@ -6,7 +6,7 @@ import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
 import * as blossom from "./blossom.mjs";
 import { createControlServer } from "./control-socket.mjs";
-import { stateDir, logPath } from "./paths.mjs";
+import { stateDir, logPath, dataDir, profileCachePath } from "./paths.mjs";
 
 // Polyfill globalThis.WebSocket with the `ws` package before NDK ever opens
 // a connection. Root cause found 2026-09-01: Node's own built-in WebSocket
@@ -36,6 +36,98 @@ let backend = null;
 let autoLockTimer = null;
 
 const pending = new Map(); // id -> { id, pubkey, method, params, createdAt, resolve, timer }
+
+// Public kind-0 metadata for this vault's pubkey. Never secret. Loaded from
+// disk cache on boot, refreshed from the relay pool after unlock.
+let profile = null;
+
+function parseKind0(content) {
+  try {
+    const j = JSON.parse(content);
+    if (!j || typeof j !== "object") return null;
+    const picture = typeof j.picture === "string" ? j.picture.trim() : "";
+    return {
+      nip05: typeof j.nip05 === "string" ? j.nip05.trim() : "",
+      name: typeof j.name === "string" ? j.name.trim() : "",
+      displayName: typeof j.display_name === "string" ? j.display_name.trim() : "",
+      picture: /^https?:\/\//i.test(picture) ? picture : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function identityLabel(p, npubVal) {
+  if (p?.nip05) return p.nip05;
+  if (p?.displayName) return p.displayName;
+  if (p?.name) return p.name;
+  const v = String(npubVal || "");
+  return v.length > 20 ? `${v.slice(0, 12)}…${v.slice(-6)}` : v || "Nostr";
+}
+
+function loadProfileCache(hex) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(profileCachePath, "utf8"));
+    if (raw && raw.pubkeyHex === hex && raw.profile) return raw.profile;
+  } catch {
+    /* no cache yet */
+  }
+  return null;
+}
+
+function saveProfileCache(hex, p) {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      profileCachePath,
+      JSON.stringify({ pubkeyHex: hex, profile: p, fetchedAt: new Date().toISOString() }, null, 2) + "\n",
+      { mode: 0o600 },
+    );
+  } catch (err) {
+    log(`profile cache write failed: ${err?.message || err}`);
+  }
+}
+
+function profilePayload() {
+  if (!profile) return null;
+  return {
+    nip05: profile.nip05 || "",
+    name: profile.name || "",
+    displayName: profile.displayName || "",
+    picture: profile.picture || "",
+    identity: identityLabel(profile, npub),
+  };
+}
+
+async function refreshProfile() {
+  if (!ndk || !pubkeyHex) return;
+  const cached = loadProfileCache(pubkeyHex);
+  if (cached && !profile) {
+    profile = cached;
+    broadcastStatus();
+  }
+  try {
+    const event = await Promise.race([
+      ndk.fetchEvent({ kinds: [0], authors: [pubkeyHex] }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("kind-0 fetch timeout")), 8000)),
+    ]);
+    if (!event) {
+      log("kind-0 profile: none found on connected relays");
+      return;
+    }
+    const parsed = parseKind0(event.content);
+    if (!parsed) {
+      log("kind-0 profile: unreadable content");
+      return;
+    }
+    profile = parsed;
+    saveProfileCache(pubkeyHex, parsed);
+    log(`kind-0 profile: ${identityLabel(profile, npub)}`);
+    broadcastStatus();
+  } catch (err) {
+    log(`kind-0 profile fetch failed: ${err?.message || err}`);
+  }
+}
 
 function log(line) {
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -82,7 +174,10 @@ async function unlockWith(passphrase) {
 
   touchActivity();
   log(`unlocked as ${npub}`);
+  const cached = loadProfileCache(pubkeyHex);
+  if (cached) profile = cached;
   broadcastStatus();
+  refreshProfile().catch((err) => log(`kind-0 refresh: ${err?.message || err}`));
   return { npub, pubkeyHex };
 }
 
@@ -160,6 +255,8 @@ function status() {
   // configured" even before unlock. The in-memory npub/pubkeyHex (set only
   // while unlocked) take precedence in case they ever diverge.
   const meta = vault.readMeta();
+  const hex = pubkeyHex || meta?.pubkeyHex || null;
+  if (!profile && hex) profile = loadProfileCache(hex);
   return {
     locked: !skBytes,
     vaultExists: vault.exists(),
@@ -170,6 +267,7 @@ function status() {
     autoLockMinutes: config.autoLockMinutes,
     clients: config.clients,
     pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, createdAt: p.createdAt })),
+    profile: profilePayload(),
   };
 }
 
