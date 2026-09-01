@@ -204,6 +204,12 @@ Panel {
     pasteProcess.running = true
   }
 
+  function pickImageFile() {
+    if (!root.blossomUrl) { root.errorText = "Set a Blossom server under settings below first."; return }
+    pickProcess.running = false
+    pickProcess.running = true
+  }
+
   function approve(id, remember) {
     runAction("approve", { id: id, remember: remember, label: "Approved app" }, function(res) { root.refreshStatus() })
   }
@@ -312,6 +318,33 @@ Panel {
     onExited: function(exitCode) {
       if (exitCode === 0) root.uploadFromPath(root.pastePath)
       else root.errorText = "No image on the clipboard (wl-paste found nothing)."
+    }
+  }
+
+  // qs.Ui has no FileDialog. QtQuick.Dialogs / Qt.labs.platform FileDialog
+  // from a Quickshell layer-shell panel is flaky on Hyprland. zenity is
+  // installed on this box and talks to xdg-desktop-portal as its own
+  // window — same "shell out" pattern as wl-paste above.
+  Process {
+    id: pickProcess
+    running: false
+    command: [
+      "/usr/bin/zenity",
+      "--file-selection",
+      "--title=Attach image",
+      "--filename=" + (Quickshell.env("HOME") + "/Pictures/"),
+      "--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif"
+    ]
+    stdout: StdioCollector {
+      id: pickStdout
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      var p = String(pickStdout.text || "").trim()
+      if (!p) { root.errorText = "No file selected."; return }
+      root.attachPath = p
+      root.uploadFromPath(p)
     }
   }
 
@@ -555,7 +588,7 @@ Panel {
 
               TextField {
                 width: parent.width
-                placeholderText: "Image path (no file picker in the kit)"
+                placeholderText: "Or paste a path"
                 foreground: root.foreground
                 enabled: !root.busy
                 text: root.attachPath
@@ -566,11 +599,11 @@ Panel {
               Row {
                 spacing: Style.space(6)
                 Button {
-                  text: "Upload file"
+                  text: "Choose image"
                   foreground: root.foreground
                   bordered: true
-                  enabled: !root.busy && root.attachPath.trim().length > 0
-                  onClicked: root.uploadFromPath(root.attachPath)
+                  enabled: !root.busy
+                  onClicked: root.pickImageFile()
                 }
                 Button {
                   text: "Paste image"
@@ -578,6 +611,14 @@ Panel {
                   bordered: true
                   enabled: !root.busy
                   onClicked: root.pasteClipboardImage()
+                }
+                Button {
+                  visible: root.attachPath.trim().length > 0 && !(root.attachedBlob && root.attachedBlob.url)
+                  text: "Upload path"
+                  foreground: root.foreground
+                  bordered: true
+                  enabled: !root.busy
+                  onClicked: root.uploadFromPath(root.attachPath)
                 }
                 Button {
                   visible: !!(root.attachedBlob && root.attachedBlob.url)
