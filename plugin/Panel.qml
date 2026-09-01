@@ -32,6 +32,7 @@ Panel {
   property var clients: ({})
   property var pendingList: []
   property bool daemonReachable: false
+  property var profile: null
 
   property bool busy: false
   property string errorText: ""
@@ -57,6 +58,15 @@ Panel {
   // relays can and do accept longer notes, so this only warns, it never
   // blocks Post.
   readonly property int softLimit: 700
+  readonly property string identityTitle: {
+    var p = root.profile
+    if (p && p.nip05) return p.nip05
+    if (p && p.displayName) return p.displayName
+    if (p && p.name) return p.name
+    if (root.vaultExists && root.npub) return root.shortKey(root.npub)
+    return "Nostr"
+  }
+  readonly property string profilePicture: (root.profile && root.profile.picture) ? root.profile.picture : ""
   readonly property bool canPost: !root.locked && root.vaultExists && root.daemonReachable && !root.busy && (root.draft.trim().length > 0 || !!(root.attachedBlob && root.attachedBlob.url))
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -100,6 +110,7 @@ Panel {
     if (!blossomField.activeFocus) root.blossomText = root.blossomUrl
     root.clients = data.clients || {}
     root.pendingList = data.pending || []
+    root.profile = data.profile || null
   }
 
   function refreshStatus() {
@@ -395,7 +406,7 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: root.vaultExists ? (root.npub ? root.shortKey(root.npub) : "Nostr") : "Nostr"
+            title: root.identityTitle
             meta: !root.daemonReachable ? "Signer daemon unreachable"
               : !root.vaultExists ? "No key configured"
               : root.locked ? "Locked"
@@ -404,6 +415,24 @@ Panel {
             foreground: root.foreground
             fontFamily: root.fontFamily
             trailingControl: root.vaultExists && !root.locked ? lockNowButton : null
+            iconComponent: root.profilePicture !== "" ? avatarComp : null
+          }
+
+          Component {
+            id: avatarComp
+            Rectangle {
+              width: Style.space(28)
+              height: Style.space(28)
+              radius: width / 2
+              clip: true
+              color: Qt.darker(root.foreground, 2.4)
+              Image {
+                anchors.fill: parent
+                source: root.profilePicture
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+              }
+            }
           }
 
           Component {
