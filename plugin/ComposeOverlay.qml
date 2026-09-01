@@ -34,11 +34,29 @@ Item {
   property string errorText: ""
   property string statusText: ""
   property string draft: ""
+  // Brief WlrKeyboardFocus.Exclusive prime, then settle on OnDemand — same
+  // technique as qs.Ui.KeyboardPanel (see its own header comment for the
+  // full rationale). Exclusive alone would also work for grabbing keyboard
+  // focus on map, but Hyprland then routes every pointer event compositor-
+  // wide to this surface regardless of which output the cursor is actually
+  // over, which would eat clicks/scroll on other monitors for as long as
+  // the overlay stays open. The brief prime avoids that while still
+  // reliably claiming focus at map time — which xdg-popup-style widgets
+  // don't get at all (they only receive keys after a click routes focus
+  // through their parent surface), and why an always-OnDemand overlay
+  // opened purely by hotkey silently ate no keystrokes here before this.
+  property bool focusPrimed: false
 
   readonly property string nodeBin: Quickshell.env("HOME") + "/.local/share/mise/shims/node"
   readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omarchy-nostr-signer/bin/ctl.mjs"
   readonly property int softLimit: 700
   readonly property bool canPost: root.daemonReachable && root.vaultExists && !root.locked && !root.busy && root.draft.trim().length > 0
+  // The compose TextArea only exists in the visible tree once the async
+  // status check (spawned in open()) actually returns — it can take
+  // longer than the compositor-level focus prime below. Tracked so the
+  // Qt-level forceActiveFocus() call fires exactly when the field becomes
+  // available, not on a fixed timer that might race ahead of it.
+  readonly property bool composeReady: !root.checking && root.daemonReachable && root.vaultExists && !root.locked
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -56,7 +74,8 @@ Item {
     root.errorText = ""
     root.statusText = ""
     root.refreshStatus()
-    Qt.callLater(function() { draftField.forceActiveFocus() })
+    root.focusPrimed = false
+    focusPrimeTimer.restart()
   }
 
   function close() {
@@ -72,6 +91,12 @@ Item {
   function toggle() {
     if (root.opened) root.dismiss()
     else root.open("{}")
+  }
+
+  // Fires once composeReady flips true after open() — see the property's
+  // own comment for why this can't just be a fixed-delay timer.
+  onComposeReadyChanged: {
+    if (root.opened && root.composeReady) Qt.callLater(function() { draftField.forceActiveFocus() })
   }
 
   function refreshStatus() {
@@ -157,6 +182,19 @@ Item {
   }
   property string _actionOutput: ""
 
+  // Leave enough time for multiple Qt/Wayland commit cycles after the
+  // surface becomes visible, matching KeyboardPanel's own interval and
+  // reasoning. Only responsible for the compositor-level Exclusive ->
+  // OnDemand handoff; which QML Item actually holds Qt-level active focus
+  // (escCatcher vs draftField) is handled separately by escCatcher.focus
+  // and onComposeReadyChanged below, since the status check that decides
+  // that can resolve well after this fixed interval.
+  Timer {
+    id: focusPrimeTimer
+    interval: 75
+    onTriggered: if (root.opened) root.focusPrimed = true
+  }
+
   // Posting a note is done; give the user a beat to see the confirmation,
   // then close so the overlay doesn't linger over whatever they were doing.
   Timer {
@@ -173,7 +211,13 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "tim-nostr-compose-overlay"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // Prime with Exclusive on every open, then settle on OnDemand — see the
+    // focusPrimed property comment above. WlrLayershell.keyboardFocus.None
+    // while closed so a fading-out (still-visible) surface doesn't hold
+    // focus after root.opened flips false.
+    WlrLayershell.keyboardFocus: root.opened
+      ? (root.focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+      : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
@@ -201,7 +245,16 @@ Item {
       Item {
         id: escCatcher
         anchors.fill: parent
-        focus: true
+        // Holds keyboard focus only while there's no TextArea to type into.
+        // This was the actual bug: `focus: true` here unconditionally,
+        // regardless of state, meant it always won the initial-focus race
+        // against draftField.forceActiveFocus() once compose became ready
+        // — so the field displayed but keystrokes never reached it. Now it
+        // steps aside the moment composeReady flips true; draftField's own
+        // Keys.onPressed already handles Escape (see below) once it holds
+        // real focus, so there's no ancestor/descendant key-routing
+        // ambiguity to reason about in either state.
+        focus: !root.composeReady
         Keys.onEscapePressed: root.dismiss()
 
         Column {
