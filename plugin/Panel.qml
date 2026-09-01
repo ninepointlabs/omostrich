@@ -52,6 +52,9 @@ Panel {
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
   property bool settingsExpanded: false
   property bool notificationsEnabled: true
+  property bool nip46ManualExpand: false
+  readonly property bool nip46Expanded: root.nip46ManualExpand || root.pendingList.length > 0
+  readonly property string nip46Summary: "Remote signing" + (root.pendingList.length > 0 ? " · " + root.pendingList.length + " pending" : "")
 
   // --- Compose state ---------------------------------------------------
   property string draft: ""
@@ -289,6 +292,7 @@ Panel {
       root.refreshStatus()
     } else {
       root.settingsExpanded = false
+      root.nip46ManualExpand = false
     }
   }
 
@@ -756,106 +760,129 @@ Panel {
             spacing: Style.space(6)
 
             PanelSeparator { foreground: root.foreground }
-            PanelSectionHeader { text: "REMOTE SIGNING (NIP-46)"; foreground: root.foreground; fontFamily: root.fontFamily }
 
-            Text {
+            MouseArea {
               width: parent.width
-              wrapMode: Text.WordWrap
-              text: "Paste this into a NIP-46 client (Amber, nsec.app, etc.) to request signatures from this signer. Every request still needs your approve/deny below."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
+              height: nip46SummaryText.height
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.nip46ManualExpand = !root.nip46ManualExpand
+
+              Text {
+                id: nip46SummaryText
+                width: parent.width
+                text: root.nip46Summary
+                color: root.pendingList.length > 0 ? root.urgent : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: root.pendingList.length > 0
+                elide: Text.ElideRight
+              }
             }
 
-            Row {
+            Column {
+              visible: root.nip46Expanded
               width: parent.width
               spacing: Style.space(6)
 
+              PanelSectionHeader { text: "REMOTE SIGNING (NIP-46)"; foreground: root.foreground; fontFamily: root.fontFamily }
+
               Text {
-                width: parent.width - copyBunkerButton.width - parent.spacing
-                text: root.bunkerUrl
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Paste this into a NIP-46 client (Amber, nsec.app, etc.) to request signatures from this signer. Every request still needs your approve/deny below."
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
-                elide: Text.ElideMiddle
               }
 
-              Button {
-                id: copyBunkerButton
-                text: "Copy"
-                foreground: root.foreground
-                bordered: true
-                onClicked: root.copyBunkerUrl()
-              }
-            }
-          }
-
-          // --- Unlocked: pending requests ----------------------------------
-          Column {
-            visible: root.vaultExists && !root.locked && root.pendingList.length > 0
-            width: parent.width
-            spacing: Style.space(8)
-
-            PanelSeparator { foreground: root.foreground }
-            PanelSectionHeader { text: "PENDING REQUESTS"; foreground: root.foreground; fontFamily: root.fontFamily }
-
-            Repeater {
-              model: root.pendingList
-              delegate: Column {
-                required property var modelData
-                width: column.width
-                spacing: Style.space(4)
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
 
                 Text {
-                  width: parent.width
-                  text: root.shortKey(modelData.pubkey) + " — " + modelData.method
-                  color: root.foreground
+                  width: parent.width - copyBunkerButton.width - parent.spacing
+                  text: root.bunkerUrl
+                  color: root.dim
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  elide: Text.ElideRight
-                }
-
-                Row {
-                  spacing: Style.space(6)
-                  Button { text: "Approve once"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, false) }
-                  Button { text: "Always allow"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, true) }
-                  Button { text: "Deny"; foreground: root.urgent; bordered: true; onClicked: root.deny(modelData.id) }
-                }
-              }
-            }
-          }
-
-          // --- Unlocked: authorized apps ------------------------------------
-          Column {
-            visible: root.vaultExists && !root.locked && Object.keys(root.clients).length > 0
-            width: parent.width
-            spacing: Style.space(8)
-
-            PanelSeparator { foreground: root.foreground }
-            PanelSectionHeader { text: "AUTHORIZED APPS"; foreground: root.foreground; fontFamily: root.fontFamily }
-
-            Repeater {
-              model: Object.keys(root.clients)
-              delegate: Row {
-                required property string modelData
-                width: column.width
-                spacing: Style.space(8)
-
-                Text {
-                  width: parent.width - revokeButton.width - Style.space(8)
-                  text: (root.clients[modelData].label || "Unnamed app") + " — " + root.shortKey(modelData)
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  elide: Text.ElideRight
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideMiddle
                 }
 
                 Button {
-                  id: revokeButton
-                  text: "Revoke"
-                  foreground: root.urgent
+                  id: copyBunkerButton
+                  text: "Copy"
+                  foreground: root.foreground
                   bordered: true
-                  onClicked: root.revokeClient(modelData)
+                  onClicked: root.copyBunkerUrl()
+                }
+              }
+
+              // --- Pending requests --------------------------------------
+              Column {
+                visible: root.pendingList.length > 0
+                width: parent.width
+                spacing: Style.space(8)
+
+                PanelSectionHeader { text: "PENDING REQUESTS"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+                Repeater {
+                  model: root.pendingList
+                  delegate: Column {
+                    required property var modelData
+                    width: column.width
+                    spacing: Style.space(4)
+
+                    Text {
+                      width: parent.width
+                      text: root.shortKey(modelData.pubkey) + " — " + modelData.method
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Row {
+                      spacing: Style.space(6)
+                      Button { text: "Approve once"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, false) }
+                      Button { text: "Always allow"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, true) }
+                      Button { text: "Deny"; foreground: root.urgent; bordered: true; onClicked: root.deny(modelData.id) }
+                    }
+                  }
+                }
+              }
+
+              // --- Authorized apps ----------------------------------------
+              Column {
+                visible: Object.keys(root.clients).length > 0
+                width: parent.width
+                spacing: Style.space(8)
+
+                PanelSectionHeader { text: "AUTHORIZED APPS"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+                Repeater {
+                  model: Object.keys(root.clients)
+                  delegate: Row {
+                    required property string modelData
+                    width: column.width
+                    spacing: Style.space(8)
+
+                    Text {
+                      width: parent.width - revokeButton.width - Style.space(8)
+                      text: (root.clients[modelData].label || "Unnamed app") + " — " + root.shortKey(modelData)
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Button {
+                      id: revokeButton
+                      text: "Revoke"
+                      foreground: root.urgent
+                      bordered: true
+                      onClicked: root.revokeClient(modelData)
+                    }
+                  }
                 }
               }
             }
