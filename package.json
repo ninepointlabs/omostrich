@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@nostr-dev-kit/ndk": "^3.0.3",
-    "nostr-tools": "^2.25.0"
+    "nostr-tools": "^2.25.0",
+    "ws": "^8.21.3"
   }
 }

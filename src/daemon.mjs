@@ -1,10 +1,26 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
+import WS from "ws";
 import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
 import { createControlServer } from "./control-socket.mjs";
 import { stateDir, logPath } from "./paths.mjs";
+
+// Polyfill globalThis.WebSocket with the `ws` package before NDK ever opens
+// a connection. Root cause found 2026-09-01: Node's own built-in WebSocket
+// (built on undici) silently fails against some real, healthy relays —
+// confirmed against wss://relay.pleb.one, which ALPN-negotiates HTTP/2 with
+// Node's client, then the WS upgrade path breaks internally in undici
+// (`TypeError` inside `#onSocketClose`, connection closes with code 1006,
+// zero useful error message). A plain Python TLS socket pinned to
+// `http/1.1` completes the exact same handshake against the same relay in
+// under 200ms, so this is a Node/undici client bug, not a relay problem —
+// `ws` doesn't have it. Fixes exactly the relays this bites; does nothing
+// for a relay that's genuinely unreachable (verified separately that
+// relay.nostr.band times out even at the raw TCP/TLS level from this
+// network — a real outage, not something a client library can paper over).
+globalThis.WebSocket = WS;
 
 const PENDING_TIMEOUT_MS = 120_000;
 
@@ -48,6 +64,17 @@ async function unlockWith(passphrase) {
   const signer = new NDKPrivateKeySigner(skBytes);
   ndk = new NDK({ explicitRelayUrls: config.relays });
   await ndk.connect(4000).catch((err) => log(`relay connect warning: ${err?.message || err}`));
+
+  // ndk.connect(4000) races a 4s timeout against every relay's handshake —
+  // it does NOT guarantee all of them are connected by the time it
+  // resolves, only that it waited up to 4s for them to be. Log the actual
+  // per-relay outcome so a partial connect is visible here instead of only
+  // showing up later as a silently-skipped relay in a publish attempt.
+  const connectedUrls = new Set(ndk.pool.connectedRelays().map((r) => r.url));
+  const relayStates = config.relays
+    .map((url) => `${url}=${connectedUrls.has(url) || connectedUrls.has(url + "/") ? "connected" : "not yet"}`)
+    .join(", ");
+  log(`post-connect relay states (4s window): ${relayStates}`);
 
   backend = new NDKNip46Backend(ndk, signer, permitCallback, config.relays);
   await backend.start();
@@ -154,17 +181,38 @@ async function signInternal(eventTemplate) {
 }
 
 // Direct-path publish for first-party plugins (e.g. omarchy-nostr-compose):
-// sign a kind-1 text note and broadcast it on this daemon's already-connected
-// relay pool, so a plugin never needs its own relay/NDK connection just to
-// post. Same trust boundary as sign_internal (control socket = already this
+// sign a kind-1 text note and broadcast it to every relay this daemon is
+// CONFIGURED for — not whichever subset NDK's default relay-set calculation
+// happens to already consider connected.
+//
+// Root cause of the 2026-09-01 partial-publish bug: NDKEvent.publish() with
+// no explicit relaySet calls calculateRelaySetFromEvent(), which builds its
+// set from ndk.pool.permanentAndConnectedRelays() — relays already in the
+// CONNECTED state at that exact instant. unlockWith()'s ndk.connect(4000)
+// races a 4s timeout and does not guarantee every configured relay finishes
+// its WebSocket handshake within it; a relay still mid-handshake (or one
+// that dropped since) is silently excluded from the relay set and never
+// gets a publish attempt at all — not a timeout, not a silent relay, just
+// never tried. That is why only 2 of 4 configured relays saw the note.
+//
+// Fix: resolve each of config.relays explicitly via ndk.pool.getRelay(),
+// which creates+connects it if it isn't in the pool yet, then publish to
+// each directly with NDKRelay.publish(). That method's own implementation
+// (NDKRelayPublisher) connects a disconnected relay itself and waits for
+// the connection before sending, rather than requiring it to already be up
+// — so a slow or dropped relay gets a real attempt instead of being quietly
+// dropped from the set before publish() is even called.
+//
+// Same trust boundary as sign_internal (control socket = already this
 // user), but unlike sign_internal this leaves a permanent public record, so
-// it always logs kind/id/content-length/relay-count regardless of that
-// TODO's still-open decision for sign_internal itself.
+// it always logs a per-relay outcome regardless of that TODO's still-open
+// decision for sign_internal itself.
 async function publishNote(content) {
   if (!skBytes) throw new Error("locked");
   if (!ndk) throw new Error("not connected to relays");
   const text = String(content ?? "").trim();
   if (!text) throw new Error("content required");
+  if (!Array.isArray(config.relays) || config.relays.length === 0) throw new Error("no relays configured");
 
   const signed = await signInternal({
     kind: 1,
@@ -174,10 +222,31 @@ async function publishNote(content) {
   });
 
   const ndkEvent = new NDKEvent(ndk, signed);
-  const relaySet = await ndkEvent.publish(undefined, 8000);
-  const publishedTo = [...relaySet].map((relay) => relay.url);
-  log(`published kind-1 ${signed.id} (${text.length} chars) to ${publishedTo.length} relay(s): ${publishedTo.join(", ")}`);
-  return { event: signed, publishedTo };
+  const relayUrls = config.relays;
+
+  const outcomes = await Promise.allSettled(
+    relayUrls.map(async (url) => {
+      const relay = ndk.pool.getRelay(url, true, false);
+      await relay.publish(ndkEvent, 8000);
+      return url;
+    })
+  );
+
+  const publishedTo = [];
+  const failed = [];
+  outcomes.forEach((outcome, i) => {
+    const url = relayUrls[i];
+    if (outcome.status === "fulfilled") publishedTo.push(url);
+    else failed.push({ url, error: String(outcome.reason?.message || outcome.reason) });
+  });
+
+  const perRelayLine = relayUrls
+    .map((url, i) => `${url}=${outcomes[i].status === "fulfilled" ? "ok" : "FAILED"}`)
+    .join(", ");
+  log(`published kind-1 ${signed.id} (${text.length} chars): ${perRelayLine}`);
+  for (const f of failed) log(`  publish failure ${f.url}: ${f.error}`);
+
+  return { event: signed, publishedTo, failed };
 }
 
 async function handleCommand(cmd, req) {
@@ -203,6 +272,14 @@ async function handleCommand(cmd, req) {
       if (!Array.isArray(req.relays) || req.relays.length === 0) throw new Error("relays must be a non-empty array");
       config.relays = req.relays;
       configStore.save(config);
+      // Start connecting any newly-added relay immediately rather than
+      // leaving it to whenever the next publish/subscribe lazily resolves
+      // it — matters for the NIP-46 backend's own relay subscriptions too,
+      // not just publishNote. Does not proactively disconnect relays
+      // dropped from the list; they simply stop being used.
+      if (ndk) {
+        for (const url of config.relays) ndk.pool.getRelay(url, true, false);
+      }
       return { relays: config.relays };
     }
 
