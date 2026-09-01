@@ -3,25 +3,13 @@ import QtQuick.Effects
 import qs.Commons
 import qs.Ui
 
-// Bar icon for the Nostr widget: the ostrich silhouette Tim supplied,
-// recolored to match the bar's current foreground/locked-state color via
-// MultiEffect colorization — the same technique Tray.qml's TrayIcon
-// component uses to recolor symbolic tray icons, not a new pattern. A flat
-// `Image` alone would just show whatever raster color the PNG has baked in
-// (black) regardless of theme or locked state; colorization lets this icon
-// keep behaving like the rest of the bar's icons, which all follow
-// root.barIconColor (dim when locked, urgent-colored when the daemon is
-// unreachable).
+// Bar icon: Tim's ostrich silhouette. The Image is ALWAYS visible so a
+// missing MultiEffect / failed colorization still shows a black bird
+// instead of a blank slot. MultiEffect tints it to the bar foreground
+// (same Tray.qml TrayIcon pattern) when the PNG loaded.
 //
-// Previously a hand-drawn padlock (LockIcon's original name/shape); kept
-// the file/component name LockIcon to avoid touching every reference site
-// in Panel.qml, but the drawing itself is now this silhouette.
-//
-// pendingCount adds a small numeric badge (same visual pattern as
-// TailscaleIcon.qml's warning badge) for outstanding NIP-46 approval
-// requests, so the merged Nostr widget can surface "something needs your
-// attention" without opening the dropdown. Unchanged from the padlock
-// version.
+// File/component name stays LockIcon so Panel.qml does not need a rewrite.
+// pendingCount badge is the TailscaleIcon BorderSurface dot.
 Item {
   id: root
 
@@ -41,19 +29,21 @@ Item {
     anchors.fill: parent
     fillMode: Image.PreserveAspectFit
     smooth: true
-    // Decode at physical pixels so the icon stays crisp on HiDPI displays
-    // instead of upscaling a smaller raster — same reasoning Tray.qml uses
-    // for its own icons.
     sourceSize.width: Math.round(root.iconSize * Screen.devicePixelRatio)
     sourceSize.height: Math.round(root.iconSize * Screen.devicePixelRatio)
     source: "ostrich.png"
-    visible: false
+    // Visible on purpose. The previous version hid this and only drew
+    // MultiEffect — if the PNG was missing or the effect failed, the bar
+    // slot was blank. A black silhouette on a dark bar is still a bird.
+    visible: true
     layer.enabled: true
   }
 
   MultiEffect {
+    id: tint
     anchors.fill: silhouette
     source: silhouette
+    visible: silhouette.status === Image.Ready
     colorization: 1.0
     colorizationColor: root.color
   }
