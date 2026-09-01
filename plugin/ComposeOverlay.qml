@@ -10,7 +10,7 @@ import qs.Ui
 // Extra surface, not extra chrome: no second bar icon, no second identity.
 // Same control-socket CLI (bin/ctl.mjs), same `publish` command, same
 // "this plugin never holds an nsec" boundary as the dropdown. Bound to
-// SUPER CTRL + M (confirmed unused via `omarchy menu keybindings --print`
+// SUPER + N (confirmed unused via `omarchy menu keybindings --print`
 // as of 2026-09-01) so summoning it doesn't need the bar icon open at all.
 //
 // v1 scope per the brief: compose text only. No attach/paste here — that
