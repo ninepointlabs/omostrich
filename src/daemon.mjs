@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
-import NDK, { NDKNip46Backend, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
 import { createControlServer } from "./control-socket.mjs";
@@ -153,6 +153,33 @@ async function signInternal(eventTemplate) {
   return { ...event, sig: signature, id: event.id };
 }
 
+// Direct-path publish for first-party plugins (e.g. omarchy-nostr-compose):
+// sign a kind-1 text note and broadcast it on this daemon's already-connected
+// relay pool, so a plugin never needs its own relay/NDK connection just to
+// post. Same trust boundary as sign_internal (control socket = already this
+// user), but unlike sign_internal this leaves a permanent public record, so
+// it always logs kind/id/content-length/relay-count regardless of that
+// TODO's still-open decision for sign_internal itself.
+async function publishNote(content) {
+  if (!skBytes) throw new Error("locked");
+  if (!ndk) throw new Error("not connected to relays");
+  const text = String(content ?? "").trim();
+  if (!text) throw new Error("content required");
+
+  const signed = await signInternal({
+    kind: 1,
+    content: text,
+    tags: [],
+    created_at: Math.floor(Date.now() / 1000),
+  });
+
+  const ndkEvent = new NDKEvent(ndk, signed);
+  const relaySet = await ndkEvent.publish(undefined, 8000);
+  const publishedTo = [...relaySet].map((relay) => relay.url);
+  log(`published kind-1 ${signed.id} (${text.length} chars) to ${publishedTo.length} relay(s): ${publishedTo.join(", ")}`);
+  return { event: signed, publishedTo };
+}
+
 async function handleCommand(cmd, req) {
   switch (cmd) {
     case "status":
@@ -211,6 +238,9 @@ async function handleCommand(cmd, req) {
 
     case "sign_internal":
       return signInternal(req.event);
+
+    case "publish":
+      return publishNote(req.content);
 
     default:
       throw new Error(`unknown command: ${cmd}`);
