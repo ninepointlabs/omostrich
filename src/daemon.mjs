@@ -5,8 +5,11 @@ import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner } from "@nostr-dev-
 import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
 import * as blossom from "./blossom.mjs";
+import { createNotifyWatch } from "./notify-watch.mjs";
 import { createControlServer } from "./control-socket.mjs";
 import { stateDir, logPath, dataDir, profileCachePath } from "./paths.mjs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Polyfill globalThis.WebSocket with the `ws` package before NDK ever opens
 // a connection. Root cause found 2026-09-01: Node's own built-in WebSocket
@@ -134,6 +137,15 @@ function log(line) {
   fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${line}\n`);
 }
 
+const notifyWatch = createNotifyWatch({
+  getNdk: () => ndk,
+  getPubkey: () => pubkeyHex,
+  isEnabled: () => !!skBytes && config.notificationsEnabled !== false,
+  seenPath: path.join(stateDir, "notified-ids.json"),
+  log,
+  iconPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "plugin", "ostrich.png"),
+});
+
 function touchActivity() {
   if (!skBytes) return;
   if (autoLockTimer) clearTimeout(autoLockTimer);
@@ -178,10 +190,12 @@ async function unlockWith(passphrase) {
   if (cached) profile = cached;
   broadcastStatus();
   refreshProfile().catch((err) => log(`kind-0 refresh: ${err?.message || err}`));
+  notifyWatch.start();
   return { npub, pubkeyHex };
 }
 
 function lockNow(reason) {
+  notifyWatch.stop();
   if (autoLockTimer) {
     clearTimeout(autoLockTimer);
     autoLockTimer = null;
@@ -264,6 +278,7 @@ function status() {
     pubkeyHex: pubkeyHex || meta?.pubkeyHex || null,
     relays: config.relays,
     blossomUrl: config.blossomUrl || "",
+    notificationsEnabled: config.notificationsEnabled !== false,
     autoLockMinutes: config.autoLockMinutes,
     clients: config.clients,
     pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, createdAt: p.createdAt })),
@@ -434,6 +449,15 @@ async function handleCommand(cmd, req) {
       config.blossomUrl = blossom.normalizeBlossomUrl(req.url);
       configStore.save(config);
       return { blossomUrl: config.blossomUrl };
+    }
+
+    case "set_notifications": {
+      if (typeof req.enabled !== "boolean") throw new Error("enabled must be a boolean");
+      config.notificationsEnabled = req.enabled;
+      configStore.save(config);
+      if (config.notificationsEnabled) notifyWatch.start();
+      else notifyWatch.stop();
+      return { notificationsEnabled: config.notificationsEnabled };
     }
 
     case "blossom_upload": {
