@@ -33,6 +33,7 @@ Panel {
   property var pendingList: []
   property bool daemonReachable: false
   property var profile: null
+  property string bunkerUrl: ""
 
   property bool busy: false
   property string errorText: ""
@@ -98,6 +99,7 @@ Panel {
     root.clients = data.clients || {}
     root.pendingList = data.pending || []
     root.profile = data.profile || null
+    root.bunkerUrl = data.bunkerUrl || ""
     if (typeof data.notificationsEnabled === "boolean") root.notificationsEnabled = data.notificationsEnabled
   }
 
@@ -219,6 +221,12 @@ Panel {
 
   function revokeClient(pubkey) {
     runAction("revoke_client", { pubkey: pubkey }, function(res) { root.refreshStatus() })
+  }
+
+  function copyBunkerUrl() {
+    if (!root.bunkerUrl) return
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(root.bunkerUrl) + " | wl-copy"])
+    root.statusText = "Bunker URL copied."
   }
 
   // --- Compose actions ---------------------------------------------------
@@ -738,6 +746,47 @@ Panel {
               bordered: true
               enabled: !root.busy && root.unlockPassphrase.length > 0
               onClicked: root.submitUnlock()
+            }
+          }
+
+          // --- Unlocked: NIP-46 bunker connection --------------------------
+          Column {
+            visible: root.vaultExists && !root.locked && root.bunkerUrl !== ""
+            width: parent.width
+            spacing: Style.space(6)
+
+            PanelSeparator { foreground: root.foreground }
+            PanelSectionHeader { text: "REMOTE SIGNING (NIP-46)"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+            Text {
+              width: parent.width
+              wrapMode: Text.WordWrap
+              text: "Paste this into a NIP-46 client (Amber, nsec.app, etc.) to request signatures from this signer. Every request still needs your approve/deny below."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(6)
+
+              Text {
+                width: parent.width - copyBunkerButton.width - parent.spacing
+                text: root.bunkerUrl
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+              }
+
+              Button {
+                id: copyBunkerButton
+                text: "Copy"
+                foreground: root.foreground
+                bordered: true
+                onClicked: root.copyBunkerUrl()
+              }
             }
           }
 
