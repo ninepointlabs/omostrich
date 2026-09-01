@@ -157,6 +157,10 @@ function broadcastStatus() {
   server.broadcast("status_changed", status());
 }
 
+function nip46RelayList() {
+  return Array.isArray(config.nip46Relays) && config.nip46Relays.length > 0 ? config.nip46Relays : config.relays;
+}
+
 async function unlockWith(passphrase) {
   if (skBytes) throw new Error("already unlocked");
   if (!vault.exists()) throw new Error("no vault; import a key first");
@@ -181,7 +185,7 @@ async function unlockWith(passphrase) {
     .join(", ");
   log(`post-connect relay states (4s window): ${relayStates}`);
 
-  backend = new NDKNip46Backend(ndk, signer, permitCallback, config.relays);
+  backend = new NDKNip46Backend(ndk, signer, permitCallback, nip46RelayList());
   // NDKNip46Backend's default applyToken() throws "connection token not
   // supported" whenever a connect request carries a secret/token param —
   // and the NIP-46 spec's own bunker:// example includes an optional
@@ -298,20 +302,35 @@ function status() {
     pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, createdAt: p.createdAt })),
     profile: profilePayload(),
     bunkerUrl: bunkerUrl(),
+    nip46Relays: nip46RelayList(),
   };
 }
 
-// Public connection string for NIP-46 clients (Amber, nsec.app, any
-// bunker://-capable app). No secret param: this daemon does not implement
-// token-scoped permission grants (see the applyToken no-op in
+// Public connection string for NIP-46 clients (Amber, nsec.app, Nostur,
+// any bunker://-capable app). No secret param: this daemon does not
+// implement token-scoped permission grants (see the applyToken no-op in
 // unlockWith()), so a secret would only give a false sense of
 // single-use auth without the daemon actually enforcing it. Every
 // connection still goes through the same approve/deny UX as any other
 // NIP-46 request, secret or not — that's the real authorization boundary.
+//
+// Uses nip46RelayList(), not config.relays. A NIP-46 client's connect
+// event is signed by a fresh, disposable local keypair the client
+// generates itself — not Tim's identity, which is what the posting
+// relays are actually configured to trust. relay.pleb.one in particular
+// is invite-only and only accepts Tim's own already-known pubkey; a
+// brand-new throwaway one times out there, which is exactly the failure
+// mode an iOS NIP-46 client (Nostur) hit even though the same daemon
+// worked from a web client that had an already-authorized session.
+// Confirmed 2026-09-01 with a disposable-pubkey write test against all
+// four config.relays: damus/primal accepted it, nostr.band/pleb.one
+// timed out — nostr.band because it's down from this network (a known,
+// separate issue), pleb.one because of its invite policy specifically.
 function bunkerUrl() {
   if (!pubkeyHex) return "";
-  if (!Array.isArray(config.relays) || config.relays.length === 0) return "";
-  const relayParams = config.relays.map((r) => `relay=${encodeURIComponent(r)}`).join("&");
+  const relayList = nip46RelayList();
+  if (!Array.isArray(relayList) || relayList.length === 0) return "";
+  const relayParams = relayList.map((r) => `relay=${encodeURIComponent(r)}`).join("&");
   return `bunker://${pubkeyHex}?${relayParams}`;
 }
 
@@ -428,14 +447,24 @@ async function handleCommand(cmd, req) {
       config.relays = req.relays;
       configStore.save(config);
       // Start connecting any newly-added relay immediately rather than
-      // leaving it to whenever the next publish/subscribe lazily resolves
-      // it — matters for the NIP-46 backend's own relay subscriptions too,
-      // not just publishNote. Does not proactively disconnect relays
-      // dropped from the list; they simply stop being used.
+      // leaving it to whenever the next publish lazily resolves it. Does
+      // not proactively disconnect relays dropped from the list; they
+      // simply stop being used. NIP-46's own relay set (nip46Relays) is
+      // separate — see set_nip46_relays — so this does not touch which
+      // relays the bunker:// URL points at.
       if (ndk) {
         for (const url of config.relays) ndk.pool.getRelay(url, true, false);
       }
       return { relays: config.relays };
+    }
+
+    case "set_nip46_relays": {
+      if (!Array.isArray(req.relays) || req.relays.length === 0) throw new Error("relays must be a non-empty array");
+      config.nip46Relays = req.relays;
+      configStore.save(config);
+      // Takes effect on next unlock (NDKNip46Backend's relay set is fixed
+      // at construction); does not tear down the live backend.
+      return { nip46Relays: config.nip46Relays, bunkerUrl: bunkerUrl() };
     }
 
     case "set_autolock": {
