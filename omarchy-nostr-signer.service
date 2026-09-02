@@ -8,5 +8,30 @@ ExecStart=%h/.local/share/mise/shims/node %h/Projects/omarchy-nostr-signer/src/d
 Restart=on-failure
 RestartSec=2
 
+# Audit item 4 (MEDIUM): this process holds the raw 32-byte private key
+# (and the unlock passphrase, as an unzeroable JS string) in memory
+# whenever unlocked. LimitCORE=0 is the one line that actually matters
+# most here — this machine runs systemd-coredump, and without it a crash
+# while unlocked would write that plaintext key material to a core file
+# on disk, completely outside the vault's own AES-256-GCM encryption.
+# The rest (NoNewPrivileges, ProtectSystem, ProtectHome, PrivateTmp) is
+# defense-in-depth against the same "arbitrary same-user process" trust
+# model the control socket itself already accepts (see
+# control-socket.mjs's own header comment) — it doesn't change that
+# model, it just keeps this specific process from being a stepping stone
+# to anything outside the two directories it actually needs.
+LimitCORE=0
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Everything this daemon actually reads/writes, confirmed by reading
+# paths.mjs (dataDir/stateDir) and blossom.mjs (reads arbitrary
+# Tim-chosen image paths for upload, via req.path in loadBytes() —
+# ProtectHome=read-only would otherwise block that read entirely, which
+# is why %h itself needs to stay readable and only the two specific
+# writable dirs below are opened up for writing).
+ReadWritePaths=%h/.local/share/omarchy-nostr-signer %h/.local/state/omarchy/nostr-signer
+
 [Install]
 WantedBy=default.target

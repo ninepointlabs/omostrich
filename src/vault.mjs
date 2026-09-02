@@ -36,6 +36,13 @@ export function readMeta() {
 export function create(nsec, passphrase) {
   const decoded = nip19.decode(String(nsec || "").trim());
   if (decoded.type !== "nsec") throw new Error("not an nsec key");
+  // Audit item 5 (LOW): this check previously only existed in Panel.qml's
+  // submitImport(), so any caller that talks to the control socket
+  // directly — bypassing the QML entirely, which the socket's own trust
+  // model explicitly allows for anything running as this user — could
+  // create a vault with an empty or trivial passphrase. Enforced here so
+  // the daemon itself never accepts one regardless of caller.
+  if (String(passphrase ?? "").length < 8) throw new Error("passphrase must be at least 8 characters");
   const skBytes = decoded.data;
 
   const pubkeyHex = getPublicKey(skBytes);
