@@ -1,11 +1,11 @@
 {
-  "name": "omarchy-nostr-signer",
-  "version": "0.1.0",
+  "name": "omostrich",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Local Nostr key custody daemon: holds an encrypted nsec, signs on request over a Unix socket for first-party Omarchy plugins, and answers NIP-46 remote-signing requests over relays.",
+  "description": "Local Nostr key custody daemon (product name Omostrich): holds an encrypted nsec, signs on request over a Unix socket for first-party Omarchy plugins, and answers NIP-46 remote-signing requests over relays.",
   "bin": {
-    "omarchy-nostr-signer-ctl": "./bin/ctl.mjs"
+    "omostrich-ctl": "./bin/ctl.mjs"
   },
   "scripts": {
     "start": "node src/daemon.mjs"

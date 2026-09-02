@@ -11,19 +11,23 @@ import qs.Ui
 // relays — all in a single dropdown instead of two separate icons.
 //
 // This plugin holds no key material itself. Every action shells out to the
-// omarchy-nostr-signer control-socket CLI (bin/ctl.mjs), which is the only
+// omostrich control-socket CLI (bin/ctl.mjs), which is the only
 // process that ever touches the decrypted key. Merged 2026-09-01 from what
 // were previously two plugins (tim.nostr-signer + tim.nostr-compose, the
 // latter now retired) per feedback that a second icon just for composing
-// was one chip too many for what this actually does.
+// was one chip too many for what this actually does. Renamed 2026-09-03
+// to the product name Omostrich (id tim.omostrich, was tim.nostr-signer;
+// repo moved ~/Projects/omarchy-nostr-signer -> ~/Projects/omostrich) —
+// same signer daemon underneath, same control socket, same everything
+// except the name.
 Panel {
   id: root
-  moduleName: "tim.nostr-signer"
-  ipcTarget: "tim.nostr-signer"
+  moduleName: "tim.omostrich"
+  ipcTarget: "tim.omostrich"
   manageIpc: false
 
   readonly property string nodeBin: Quickshell.env("HOME") + "/.local/share/mise/shims/node"
-  readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omarchy-nostr-signer/bin/ctl.mjs"
+  readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omostrich/bin/ctl.mjs"
 
   property bool locked: true
   property bool vaultExists: false

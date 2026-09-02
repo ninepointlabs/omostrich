@@ -82,7 +82,7 @@ attempted.
 
 ## 4. MEDIUM — systemd unit had no hardening, no `LimitCORE=0` — CLOSED
 
-`omarchy-nostr-signer.service`
+`omostrich.service` (was `omarchy-nostr-signer.service` before the 2026-09-03 product rename)
 
 Added `LimitCORE=0` (the one that matters most: this machine runs
 `systemd-coredump`, and without it a crash while unlocked would write
@@ -90,8 +90,8 @@ the raw 32-byte key to a core file on disk, outside the vault's
 encryption entirely), plus `NoNewPrivileges=true`, `PrivateTmp=true`,
 `ProtectSystem=strict`, `ProtectHome=read-only`, and explicit
 `ReadWritePaths=` for exactly the two directories the daemon actually
-writes to (`~/.local/share/omarchy-nostr-signer`,
-`~/.local/state/omarchy/nostr-signer` — confirmed by reading
+writes to (`~/.local/share/omostrich`,
+`~/.local/state/omarchy/omostrich` — confirmed by reading
 `paths.mjs`). `ProtectHome=read-only` (not `yes`/`tmpfs`) specifically
 because `blossom.mjs`'s `loadBytes()` reads arbitrary Tim-chosen image
 paths from anywhere under `$HOME` (e.g. `~/Pictures/foo.png`) for
@@ -102,7 +102,7 @@ nothing there needs write access). Verified with `systemd-analyze
 verify` against the unit file directly — exit 0, no warnings.
 
 **Requires a daemon restart to take effect** — a `systemctl daemon-reload`
-plus `restart omarchy-nostr-signer.service`, which re-locks the vault
+plus `restart omostrich.service`, which re-locks the vault
 (Tim unlocks again from the bar). Not done automatically by this fix;
 Keeley applies it.
 

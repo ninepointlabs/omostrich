@@ -5,7 +5,7 @@ import { socketPath } from "../src/paths.mjs";
 const [cmd] = process.argv.slice(2);
 
 if (!cmd) {
-  process.stderr.write("usage: omarchy-nostr-signer-ctl <cmd> [json-payload]\n");
+  process.stderr.write("usage: omostrich-ctl <cmd> [json-payload]\n");
   process.stderr.write("       (or pipe the JSON payload on stdin instead of an argv arg)\n");
   process.exit(2);
 }
