@@ -4,7 +4,19 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/share/mise/shims/node %h/Projects/omostrich/src/daemon.mjs
+# Bare "node" resolved via the unit's PATH, not a hardcoded mise shim
+# path. Was ExecStart=%h/.local/share/mise/shims/node ... — that's one
+# specific Node installer's layout, and it silently doesn't exist for
+# anyone using the system node package, nvm, fnm, or volta instead.
+# This resolves correctly on any Omarchy install: Omarchy's own default
+# Hyprland autostart (default/hypr/autostart.lua) runs `systemctl
+# --user import-environment $(env | cut -d'=' -f 1)` at every session
+# start, importing the full session PATH into the systemd --user
+# manager this unit runs under — confirmed live by reading this
+# machine's actual running daemon process's environ, which already
+# carries the mise shims dir via exactly that mechanism, not anything
+# unit-specific.
+ExecStart=node %h/Projects/omostrich/daemon/daemon.mjs
 Restart=on-failure
 RestartSec=2
 

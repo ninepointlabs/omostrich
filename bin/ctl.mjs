@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import net from "node:net";
-import { socketPath } from "../src/paths.mjs";
+import { socketPath } from "../daemon/paths.mjs";
 
 const [cmd] = process.argv.slice(2);
 

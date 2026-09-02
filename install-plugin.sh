@@ -12,14 +12,21 @@ OLD_SIGNER_TARGET="$HOME/.config/omarchy/plugins/nostr-signer"
 # per-file symlinks didn't reliably work either. Copying means re-running
 # this script is what deploys an edit — there is no live-symlink shortcut.
 #
-# The *.qml glob below covers every QML file in this directory, currently
+# manifest.json, the QML, and ostrich.png live at the repo root (not a
+# plugin/ subdirectory) so `omarchy plugin validate`/`omarchy plugin add`
+# find manifest.json exactly where the Omarchy plugin marketplace requires
+# it. The daemon's own source lives under daemon/ instead — this script
+# only ever touches the plugin-facing files at the repo root, never
+# daemon/.
+#
+# The *.qml glob below covers every QML file at the repo root, currently
 # Panel.qml, ComposeOverlay.qml, AND LockIcon.qml — do not replace this
 # with a hand-picked file list. Panel.qml's bar-icon iconComponent
 # instantiates LockIcon directly; a deploy that omits LockIcon.qml (e.g.
 # a manual `cp Panel.qml ComposeOverlay.qml ostrich.png manifest.json`)
 # leaves Quickshell unable to draw the bar chip at all — a blank slot
 # where the icon should be. This happened for real on this machine
-# right after the repo rename, from exactly that kind of hand-copy.
+# right after an earlier repo rename, from exactly that kind of hand-copy.
 mkdir -p "$TARGET"
 cp "$DIR"/*.qml "$DIR"/*.png "$DIR"/manifest.json "$TARGET/"
 
@@ -28,7 +35,7 @@ echo "Copied $DIR/*.{qml,png,json} -> $TARGET/"
 omarchy plugin validate "$DIR"
 
 # Plugin id is now tim.omostrich (renamed from tim.nostr-signer). If the
-# old tim.nostr-compose icon (retired well before this rename) or the
+# old tim.nostr-compose icon (retired well before that rename) or the
 # pre-rename tim.nostr-signer install dir are still present from an
 # earlier version of this repo, clean them up so the plugin list doesn't
 # show a stale/duplicate entry pointing at files that no longer exist.
@@ -58,6 +65,6 @@ fi
 # plugins-dir inotify watcher and `shell rescanPlugins` do not reliably force
 # Quickshell to recompile a changed QML file. A full shell restart is the
 # only thing observed to actually pick up an edit. This restarts just the
-# Omarchy shell chrome (bar/panels) — other running apps are unaffected.
+# Omarchy shell chrome (bar/panels); other running apps are unaffected.
 omarchy restart shell
 echo "Restarted the Omarchy shell so this change is actually live."

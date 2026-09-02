@@ -9,7 +9,7 @@
     "omostrich-mcp": "./bin/mcp.mjs"
   },
   "scripts": {
-    "start": "node src/daemon.mjs",
+    "start": "node daemon/daemon.mjs",
     "mcp": "node bin/mcp.mjs"
   },
   "dependencies": {

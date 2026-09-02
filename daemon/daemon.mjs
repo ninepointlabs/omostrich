@@ -143,7 +143,7 @@ const notifyWatch = createNotifyWatch({
   isEnabled: () => !!skBytes && config.notificationsEnabled !== false,
   seenPath: path.join(stateDir, "notified-ids.json"),
   log,
-  iconPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "plugin", "ostrich.png"),
+  iconPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "ostrich.png"),
 });
 
 function touchActivity() {
