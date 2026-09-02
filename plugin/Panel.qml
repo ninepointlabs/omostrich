@@ -50,8 +50,31 @@ Panel {
   property string attachPath: ""
   property var attachedBlob: null
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
-  property bool settingsExpanded: false
+  property bool autoLockUserPicked: false
+  // What the picker currently shows. Seeded from the daemon's last-known
+  // autoLockMinutes each time the dropdown opens (so it reflects Tim's
+  // last actual choice, persisted daemon-side in config.json — see the
+  // submitUnlock persistence note below), then left alone once he taps a
+  // chip so a slow status refresh mid-choice can't silently revert it.
+  property string selectedAutoLockMinutes: "15"
+  function autoLockLabel(minutes) {
+    for (var i = 0; i < root.autoLockOptions.length; i++)
+      if (root.autoLockOptions[i].value === String(minutes)) return root.autoLockOptions[i].label
+    return minutes + "m"
+  }
   property bool notificationsEnabled: true
+  property int autoLockMinutes: 15
+  // 5 fixed choices per spec — not free-form, so users always land on one
+  // of these regardless of whatever the daemon's config default was set
+  // to before this slice existed. Value is the literal minutes count sent
+  // straight to `set_autolock`; label is what the chip displays.
+  readonly property var autoLockOptions: [
+    { value: "5", label: "5m" },
+    { value: "30", label: "30m" },
+    { value: "60", label: "1h" },
+    { value: "720", label: "12h" },
+    { value: "1440", label: "24h" }
+  ]
   property bool nip46ManualExpand: false
   readonly property bool nip46Expanded: root.nip46ManualExpand || root.pendingList.length > 0
   readonly property string nip46Summary: "Remote signing" + (root.pendingList.length > 0 ? " · " + root.pendingList.length + " pending" : "")
@@ -104,6 +127,10 @@ Panel {
     root.profile = data.profile || null
     root.bunkerUrl = data.bunkerUrl || ""
     if (typeof data.notificationsEnabled === "boolean") root.notificationsEnabled = data.notificationsEnabled
+    if (Number(data.autoLockMinutes) > 0) {
+      root.autoLockMinutes = Number(data.autoLockMinutes)
+      if (!root.autoLockUserPicked) root.selectedAutoLockMinutes = String(root.autoLockMinutes)
+    }
   }
 
   function refreshStatus() {
@@ -141,11 +168,45 @@ Panel {
   }
 
   function submitUnlock() {
-    runAction("unlock", { passphrase: root.unlockPassphrase }, function(res) {
-      root.unlockPassphrase = ""
-      if (res.ok) root.refreshStatus()
-      else root.errorText = res.error
+    // set_autolock first, then unlock — two calls to the existing daemon
+    // commands, no daemon.mjs change needed (per the explicit "if you
+    // must change daemon.mjs, stop" instruction: this doesn't). Ordered
+    // this way on purpose: unlockWith() already calls touchActivity()
+    // internally to start the very first auto-lock countdown, so the
+    // duration needs to be saved to config *before* that happens or the
+    // first countdown after this unlock would run on the old value.
+    var minutes = Number(root.selectedAutoLockMinutes) || 15
+    runAction("set_autolock", { minutes: minutes }, function(setRes) {
+      if (!setRes.ok) {
+        root.errorText = setRes.error
+        return
+      }
+      root.autoLockMinutes = minutes
+      runAction("unlock", { passphrase: root.unlockPassphrase }, function(res) {
+        root.unlockPassphrase = ""
+        if (res.ok) root.refreshStatus()
+        else root.errorText = res.error
+      }, false)
     })
+  }
+
+  function setAutoLock(minutesStr) {
+    root.autoLockUserPicked = true
+    root.selectedAutoLockMinutes = minutesStr
+    // Only push to the daemon immediately if already unlocked — while
+    // locked there's nothing running to reset yet; submitUnlock() sends
+    // this exact value at unlock time instead.
+    if (!root.locked) {
+      var minutes = Number(minutesStr) || 15
+      runAction("set_autolock", { minutes: minutes }, function(res) {
+        if (res.ok) {
+          root.autoLockMinutes = minutes
+          root.statusText = "Auto-lock set to " + root.autoLockLabel(minutes) + "."
+        } else {
+          root.errorText = res.error
+        }
+      }, false)
+    }
   }
 
   function lockNow() {
@@ -293,6 +354,7 @@ Panel {
     } else {
       root.settingsExpanded = false
       root.nip46ManualExpand = false
+      root.autoLockUserPicked = false
     }
   }
 
@@ -744,6 +806,23 @@ Panel {
               Keys.onReturnPressed: root.submitUnlock()
             }
 
+            Text {
+              text: "Stay unlocked for"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            ButtonGroup {
+              width: parent.width
+              options: root.autoLockOptions
+              value: root.selectedAutoLockMinutes
+              foreground: root.foreground
+              accent: root.foreground
+              fontFamily: root.fontFamily
+              onChanged: function(v) { root.setAutoLock(v) }
+            }
+
             Button {
               text: root.busy ? "Unlocking…" : "Unlock"
               foreground: root.foreground
@@ -973,6 +1052,26 @@ Panel {
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 onClicked: root.setNotifications(!root.notificationsEnabled)
+              }
+
+              PanelSectionHeader { text: "AUTO-LOCK"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+              Text {
+                width: parent.width
+                text: "Currently locks after " + root.autoLockLabel(root.autoLockMinutes) + " idle."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              ButtonGroup {
+                width: parent.width
+                options: root.autoLockOptions
+                value: root.selectedAutoLockMinutes
+                foreground: root.foreground
+                accent: root.foreground
+                fontFamily: root.fontFamily
+                onChanged: function(v) { root.setAutoLock(v) }
               }
             }
           }
