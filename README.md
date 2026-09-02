@@ -267,11 +267,53 @@ Nothing else is exposed over MCP. Unlocking, importing a key, changing
 relays/settings, and approving/denying NIP-46 requests all stay bar-icon
 only — deliberately not reachable from any agent.
 
+**`bin/mcp.mjs` ships only in the git clone — it is NOT part of the
+deployed bar plugin.** `plugin/install.sh` copies `*.qml`, `*.png`, and
+`manifest.json` into `~/.config/omarchy/plugins/omostrich/` — that
+directory does not (and should never) contain `mcp.mjs`. **Installing
+the bar chip does not register MCP with anything.** Running
+`./install.sh` (daemon) and `plugin/install.sh` (bar icon) gets you a
+working chip and a running daemon, but Hermes and Claude Code have no
+idea Omostrich exists until you separately run the `mcp add` command
+below, pointing at the repo path directly (`~/Projects/omostrich/bin/mcp.mjs`)
+— not the plugin directory, which never has this file. So the full
+sequence for a new machine is: clone, `npm ci`, `./install.sh`
+(daemon), `plugin/install.sh` (bar icon) if you want the chip too, then
+`mcp add` per-agent as its own separate step.
+
+`bin/mcp.mjs` talks to the exact same Unix control socket
+`omostrich-ctl` does — same daemon, same trust boundary, no separate
+auth. Unlock the vault from the ostrich bar icon first; a `publish`
+call against a locked vault returns the daemon's own `"locked"` error
+verbatim, same as `omostrich-ctl` would. **No nsec or passphrase ever
+crosses the MCP protocol** — connecting MCP doesn't change what the
+daemon will let you do or see; it's just a second way to call the same
+two operations (`status`, `publish`) that were already possible from
+the CLI.
+
 **Connect it in Hermes:**
 
 ```bash
 hermes mcp add omostrich --command node --args ~/Projects/omostrich/bin/mcp.mjs
 ```
+
+This prompts interactively — `Enable all 2 tools? [Y/n/select]` — and
+if stdin isn't a real terminal (running it from a script, a non-TTY
+shell, piped from another tool) that prompt gets nothing and the whole
+add is **cancelled with nothing saved**, silently, no error. Confirmed
+on this machine: running the bare command above with stdin closed
+prints "Connected! Found 2 tool(s)" and then just "Cancelled." —
+`hermes mcp list` afterward shows nothing configured. Answer the
+prompt explicitly in that case:
+
+```bash
+printf 'Y\n' | hermes mcp add omostrich --command node --args ~/Projects/omostrich/bin/mcp.mjs
+```
+
+That saves it (confirmed: `hermes mcp list` then shows `omostrich` with
+2/2 tools enabled) and prints its own reminder — **start a new Hermes
+session before the tools show up.** An already-running session doesn't
+pick up a newly-added MCP server on its own.
 
 **Connect it in Claude Code / Claude CLI:**
 
