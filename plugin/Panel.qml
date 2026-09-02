@@ -351,6 +351,18 @@ Panel {
     if (opened) {
       root.errorText = ""
       root.statusText = ""
+      // Force closed on every open, not just on close. The bar widget
+      // can stay mapped (visible: false) between opens rather than
+      // being destroyed/recreated, so a property that only reset on the
+      // close path could survive across a whole open/close/open cycle
+      // if that cycle ever skipped emitting the false edge for any
+      // reason (e.g. the panel being toggled by the shell rather than
+      // this dropdown's own close). Setting it unconditionally here
+      // means every single open starts collapsed, full stop, regardless
+      // of how it got there or what state it was left in before.
+      root.settingsExpanded = false
+      root.nip46ManualExpand = false
+      root.autoLockUserPicked = false
       root.refreshStatus()
     } else {
       root.settingsExpanded = false
@@ -978,12 +990,20 @@ Panel {
 
             MouseArea {
               width: parent.width
-              height: settingsSummaryText.height
+              // Real click target, not just the text glyph height — a
+              // single line of bodySmall text is a very thin hit box to
+              // land a click on reliably. Padding top+bottom gives a
+              // proper touch/click target the full width of the row,
+              // matching the row-height convention other clickable
+              // summary rows in this file use (Style.spacing tokens,
+              // not a bespoke pixel guess).
+              height: settingsSummaryText.height + Style.spacing.controlPaddingY * 2
               cursorShape: Qt.PointingHandCursor
               onClicked: root.settingsExpanded = !root.settingsExpanded
 
               Text {
                 id: settingsSummaryText
+                anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 text: root.settingsSummary
                 color: root.dim
