@@ -34,18 +34,6 @@ Item {
   property string errorText: ""
   property string statusText: ""
   property string draft: ""
-  // Brief WlrKeyboardFocus.Exclusive prime, then settle on OnDemand — same
-  // technique as qs.Ui.KeyboardPanel (see its own header comment for the
-  // full rationale). Exclusive alone would also work for grabbing keyboard
-  // focus on map, but Hyprland then routes every pointer event compositor-
-  // wide to this surface regardless of which output the cursor is actually
-  // over, which would eat clicks/scroll on other monitors for as long as
-  // the overlay stays open. The brief prime avoids that while still
-  // reliably claiming focus at map time — which xdg-popup-style widgets
-  // don't get at all (they only receive keys after a click routes focus
-  // through their parent surface), and why an always-OnDemand overlay
-  // opened purely by hotkey silently ate no keystrokes here before this.
-  property bool focusPrimed: false
 
   readonly property string nodeBin: Quickshell.env("HOME") + "/.local/share/mise/shims/node"
   readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omarchy-nostr-signer/bin/ctl.mjs"
@@ -53,9 +41,10 @@ Item {
   readonly property bool canPost: root.daemonReachable && root.vaultExists && !root.locked && !root.busy && root.draft.trim().length > 0
   // The compose TextArea only exists in the visible tree once the async
   // status check (spawned in open()) actually returns — it can take
-  // longer than the compositor-level focus prime below. Tracked so the
-  // Qt-level forceActiveFocus() call fires exactly when the field becomes
-  // available, not on a fixed timer that might race ahead of it.
+  // longer than any fixed timer would assume. draftField's own `visible`
+  // binding tracks this directly (see its onVisibleChanged handler) so
+  // the focus claim fires off the real state transition, not a guess at
+  // how long the round-trip usually takes.
   readonly property bool composeReady: !root.checking && root.daemonReachable && root.vaultExists && !root.locked
 
   property color background: Color.menu.background
@@ -74,8 +63,6 @@ Item {
     root.errorText = ""
     root.statusText = ""
     root.refreshStatus()
-    root.focusPrimed = false
-    focusPrimeTimer.restart()
   }
 
   function close() {
@@ -93,12 +80,6 @@ Item {
     else root.open("{}")
   }
 
-  // Fires once composeReady flips true after open() — see the property's
-  // own comment for why this can't just be a fixed-delay timer.
-  onComposeReadyChanged: {
-    if (root.opened && root.composeReady) Qt.callLater(function() { draftField.forceActiveFocus() })
-  }
-
   function refreshStatus() {
     root.checking = true
     runAction("status", undefined, function(res) {
@@ -110,11 +91,23 @@ Item {
       } else {
         root.daemonReachable = false
       }
-    })
+    }, false)
   }
 
-  function runAction(cmd, payload, onDone) {
-    root.busy = true
+  // markBusy defaults true (publish/etc. should disable the field while
+  // in flight) but status polls pass false — this was the second, worse
+  // bug behind "cannot type": every refreshStatus() call set busy=true
+  // and NOTHING ever reset it back to false for the status path, so
+  // draftField's `enabled: !root.busy` binding left it permanently
+  // disabled after the very first status check on open(). No focus fix
+  // matters against a disabled TextArea — Qt won't route keys to it at
+  // all regardless of who holds activeFocus. Caught by actually typing
+  // into a live, unlocked instance via wtype and watching nothing
+  // appear, not by reasoning about the QML alone. Matches Panel.qml's
+  // existing runAction(cmd, payload, onDone, markBusy) signature, which
+  // already had this right.
+  function runAction(cmd, payload, onDone, markBusy) {
+    if (markBusy !== false) root.busy = true
     var args = [root.nodeBin, root.ctlPath, cmd]
     if (payload !== undefined) args.push(JSON.stringify(payload))
     actionProcess.onDoneCallback = onDone
@@ -182,19 +175,6 @@ Item {
   }
   property string _actionOutput: ""
 
-  // Leave enough time for multiple Qt/Wayland commit cycles after the
-  // surface becomes visible, matching KeyboardPanel's own interval and
-  // reasoning. Only responsible for the compositor-level Exclusive ->
-  // OnDemand handoff; which QML Item actually holds Qt-level active focus
-  // (escCatcher vs draftField) is handled separately by escCatcher.focus
-  // and onComposeReadyChanged below, since the status check that decides
-  // that can resolve well after this fixed interval.
-  Timer {
-    id: focusPrimeTimer
-    interval: 75
-    onTriggered: if (root.opened) root.focusPrimed = true
-  }
-
   // Posting a note is done; give the user a beat to see the confirmation,
   // then close so the overlay doesn't linger over whatever they were doing.
   Timer {
@@ -204,6 +184,34 @@ Item {
     onTriggered: root.dismiss()
   }
 
+  // Bounded safety net under draftField's onVisibleChanged handler, for
+  // exactly one class of case that a single forceActiveFocus() call can
+  // still miss: Quickshell surfaces occasionally need more than one
+  // event-loop turn to finish wiring up a freshly-visible item's Qt focus
+  // scope after a fresh layer-shell surface maps (as opposed to Column
+  // visibility toggling within an already-mapped, already-focused-once
+  // surface, which callLater alone reliably covers). Unlike the old
+  // "assume focus landed after N ms" bug this replaces, this checks the
+  // REAL outcome each tick (draftField.activeFocus) and only re-fires
+  // forceActiveFocus() if it's still false — it never just declares
+  // victory on a timer elapsing. Capped at 10 tries (500ms total) so a
+  // permanently-stuck focus state (e.g. overlay dismissed mid-retry)
+  // can't spin forever; onVisibleChanged(false) also stops it outright.
+  Timer {
+    id: focusRetryTimer
+    interval: 50
+    repeat: true
+    property int attempts: 0
+    onTriggered: {
+      attempts += 1
+      if (!root.opened || !draftField.visible || draftField.activeFocus || attempts >= 10) {
+        stop()
+        return
+      }
+      draftField.forceActiveFocus()
+    }
+  }
+
   PanelWindow {
     id: panel
     visible: root.opened
@@ -211,12 +219,22 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "tim-nostr-compose-overlay"
     WlrLayershell.layer: WlrLayer.Overlay
-    // Prime with Exclusive on every open, then settle on OnDemand — see the
-    // focusPrimed property comment above. WlrLayershell.keyboardFocus.None
-    // while closed so a fading-out (still-visible) surface doesn't hold
-    // focus after root.opened flips false.
+    // Prime with Exclusive so the compositor actually delivers keyboard
+    // events to this surface at all — Hyprland won't send anything here
+    // without it, per KeyboardPanel's own header comment. But unlike
+    // KeyboardPanel/other Omarchy popups, we don't hand off to OnDemand on
+    // a fixed timer: the compose TextArea only exists once an async
+    // `status` round-trip over the control socket resolves (open() ->
+    // refreshStatus()), and that can take longer than any fixed interval
+    // — a timer-based handoff raced ahead of the field actually holding
+    // Qt-level focus and silently lost every time (5eb213f, still failed
+    // live: the TextArea rendered but never got keystrokes). Gate the
+    // handoff on the real outcome instead: stay Exclusive until
+    // draftField itself reports activeFocus === true (see draftField's
+    // own onVisibleChanged below for what drives that), then relax to
+    // OnDemand. No arbitrary "surely by now" delay anywhere in this path.
     WlrLayershell.keyboardFocus: root.opened
-      ? (root.focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+      ? (draftField.activeFocus ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
       : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
@@ -320,6 +338,18 @@ Item {
             TextArea {
               id: draftField
               width: parent.width
+              // Bound directly (not just inheriting the parent Column's
+              // effective visibility) so this item's own visibleChanged
+              // signal actually fires when compose becomes available —
+              // a child's `visible` property doesn't emit that signal
+              // just because an ancestor's visibility changed, only when
+              // its own property flips. `checking` is forced true again
+              // at the top of every open()/refreshStatus() call before
+              // the async status round-trip resolves, so this genuinely
+              // goes false -> true on every single open, including
+              // reopen/toggle while already unlocked from a prior
+              // session — never a same-value non-edge.
+              visible: root.composeReady
               wrapMode: TextArea.Wrap
               placeholderText: "What's happening?"
               color: root.foreground
@@ -369,6 +399,23 @@ Item {
                 }
                 event.accepted = true
                 root.post()
+              }
+
+              // The real fix: claim Qt-level active focus from this item's
+              // own visibility transition, not a fixed-delay timer racing
+              // against it from outside. Qt.callLater defers one event-loop
+              // turn so layout/anchoring has actually settled before the
+              // focus call — a synchronous forceActiveFocus() here can
+              // still land before Qt finishes wiring up the newly-visible
+              // item's focus scope. focusRetryTimer is a bounded safety
+              // net underneath this, not the primary mechanism — see its
+              // own comment for why it's not the same mistake as before.
+              onVisibleChanged: if (visible) {
+                Qt.callLater(function() { if (root.opened) draftField.forceActiveFocus() })
+                focusRetryTimer.attempts = 0
+                focusRetryTimer.restart()
+              } else {
+                focusRetryTimer.stop()
               }
             }
 
