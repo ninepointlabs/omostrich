@@ -301,11 +301,20 @@ Item {
           Text {
             textFormat: Text.PlainText
             width: parent.width
-            text: "Post to Nostr"
+            text: "Omostrich"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
             font.bold: true
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: "Post to Nostr"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
           }
 
           // --- Locked / unreachable / no key: say so, point at the icon ---
