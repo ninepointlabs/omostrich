@@ -5,10 +5,12 @@
   "type": "module",
   "description": "Local Nostr key custody daemon (product name Omostrich): holds an encrypted nsec, signs on request over a Unix socket for first-party Omarchy plugins, and answers NIP-46 remote-signing requests over relays.",
   "bin": {
-    "omostrich-ctl": "./bin/ctl.mjs"
+    "omostrich-ctl": "./bin/ctl.mjs",
+    "omostrich-mcp": "./bin/mcp.mjs"
   },
   "scripts": {
-    "start": "node src/daemon.mjs"
+    "start": "node src/daemon.mjs",
+    "mcp": "node bin/mcp.mjs"
   },
   "dependencies": {
     "@nostr-dev-kit/ndk": "^3.0.3",

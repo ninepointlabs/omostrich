@@ -230,6 +230,7 @@ set up.
 | Encrypted vault + config + profile cache | `~/.local/share/omostrich/` |
 | Control socket, daemon log, notification dedup state | `~/.local/state/omarchy/omostrich/` |
 | CLI | `omostrich-ctl` (symlinked from `bin/ctl.mjs`) |
+| MCP server (stdio) | `bin/mcp.mjs` — run directly, no symlink needed |
 | systemd unit | `omostrich.service` |
 | Plugin (deployed) | `~/.config/omarchy/plugins/omostrich/` |
 | Plugin id | `tim.omostrich` |
@@ -244,19 +245,82 @@ omostrich-ctl status
 
 ## Agent access
 
-Other agents (assistants you've explicitly asked to post something)
-can use the exact same `publish` path you do:
+Two ways for an agent (Hermes, Claude Code/CLI, Grok, etc.) to post a
+note on your explicit ask — MCP if your setup supports connecting one,
+`omostrich-ctl` otherwise. Neither surface ever holds, logs, or accepts
+an nsec or passphrase; both are thin clients of the same daemon.
+Policy for any agent using either is in [`SKILL.md`](SKILL.md) —
+explicit-ask-only, no auto-posting, never attempt to unlock.
+
+### MCP (v1: `status` and `publish` only)
+
+`bin/mcp.mjs` is a stdio MCP server exposing exactly two tools:
+
+- **`status`** — `{ locked, vaultExists, npub, relays }`. No secrets.
+- **`publish`** — takes `{ content: string }`, returns
+  `{ eventId, publishedTo, failed }` on success or an error string
+  (e.g. `"locked"`) with `isError: true` on failure. Same daemon
+  `publish` command the bar plugin uses — signs a kind-1 note and
+  broadcasts to every configured relay.
+
+Nothing else is exposed over MCP. Unlocking, importing a key, changing
+relays/settings, and approving/denying NIP-46 requests all stay bar-icon
+only — deliberately not reachable from any agent.
+
+**Connect it in Hermes:**
 
 ```bash
+hermes mcp add omostrich --command node --args ~/Projects/omostrich/bin/mcp.mjs
+```
+
+**Connect it in Claude Code / Claude CLI:**
+
+```bash
+claude mcp add omostrich -- node ~/Projects/omostrich/bin/mcp.mjs
+```
+
+No API key, no network endpoint, no daemon restart needed to connect
+either — the MCP process is a separate stdio client of the same running
+control socket, launched fresh by each agent's own MCP runtime.
+
+### `omostrich-ctl` (fallback, or if you just want a CLI)
+
+```bash
+omostrich-ctl status
 omostrich-ctl publish '{"content":"your note text"}'
 ```
 
-Response is one line of JSON — success with per-relay results, or a
-plain `{"ok":false,"error":"locked"}` / `{"ok":false,"error":"daemon_not_running"}`
-if it can't. The rule for any agent using this: only post when
-explicitly asked, in the moment, for that exact text. No automated or
-scheduled posting, ever, and no agent should ever attempt to unlock the
-vault itself.
+Response is one line of JSON on stdout:
+
+```json
+{"ok":true,"data":{"event":{...},"publishedTo":["wss://..."],"failed":[]}}
+```
+
+or, if the vault is locked:
+
+```json
+{"ok":false,"error":"locked"}
+```
+
+or if the daemon isn't running at all:
+
+```json
+{"ok":false,"error":"daemon_not_running"}
+```
+
+**Rules every calling agent must follow — these are not enforced by the
+daemon, they're the deal for using either path at all** (also in
+`SKILL.md`):
+
+- Only call `publish` when Tim has explicitly asked *that agent, in that
+  moment* to post *that* text. No auto-posting, no scheduled/cron posting,
+  no posting as a side effect of some other task.
+- If the response is locked, tell Tim the vault is locked and to unlock
+  it from the Omostrich bar icon. Do not attempt to unlock it yourself —
+  no agent has (or should ever construct) the passphrase.
+- Never print, log, or otherwise surface an nsec. No agent should ever
+  hold one; both surfaces exist specifically so none of them ever need
+  to.
 
 ## What this is not
 
