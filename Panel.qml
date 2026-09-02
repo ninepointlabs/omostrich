@@ -26,7 +26,24 @@ Panel {
   ipcTarget: "tim.omostrich"
   manageIpc: false
 
-  readonly property string nodeBin: Quickshell.env("HOME") + "/.local/share/mise/shims/node"
+  // Bare "node" resolved via PATH, not a hardcoded install location.
+  // Was previously hardcoded to a mise-managed shim path
+  // (~/.local/share/mise/shims/node) — that's one specific Node
+  // installer's layout, not something every Omarchy install has. On a
+  // machine using the system package, nvm, fnm, or volta instead, that
+  // path simply doesn't exist and the chip silently never lights up
+  // with no clear reason why. This resolves correctly on any Omarchy
+  // install, not just this machine's own setup: Omarchy's own default
+  // Hyprland autostart (default/hypr/autostart.lua) runs `systemctl
+  // --user import-environment $(env | cut -d'=' -f 1)` at every
+  // session start, which imports the full session PATH — whatever the
+  // user's Node installer put on it — into the systemd --user manager
+  // Quickshell itself runs under. Confirmed live: this machine's
+  // running daemon process (`cat /proc/<pid>/environ`) already carries
+  // the mise shims dir in its PATH via exactly that mechanism. Every
+  // other Omarchy-shipped plugin spawns bare command names the same
+  // way rather than an absolute interpreter path, for the same reason.
+  readonly property string nodeBin: "node"
   readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omostrich/bin/ctl.mjs"
 
   property bool locked: true
@@ -53,7 +70,7 @@ Panel {
   property string blossomText: ""
   property string attachPath: ""
   property var attachedBlob: null
-  property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
+  property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/omostrich/clipboard.png"
   property bool settingsExpanded: false
   property bool autoLockUserPicked: false
   // What the picker currently shows. Seeded from the daemon's last-known

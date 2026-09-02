@@ -28,7 +28,7 @@
 // spec) — implementing exactly that here, once, is a smaller footprint
 // than pulling in the full SDK for two tools.
 import net from "node:net";
-import { socketPath } from "../src/paths.mjs";
+import { socketPath } from "../daemon/paths.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 

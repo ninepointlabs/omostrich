@@ -35,7 +35,10 @@ Item {
   property string statusText: ""
   property string draft: ""
 
-  readonly property string nodeBin: Quickshell.env("HOME") + "/.local/share/mise/shims/node"
+  // See Panel.qml's matching property for the full reasoning: bare
+  // "node" resolved via PATH, not a hardcoded mise shim path that only
+  // exists on machines using that specific Node installer.
+  readonly property string nodeBin: "node"
   readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omostrich/bin/ctl.mjs"
   readonly property int softLimit: 700
   readonly property bool canPost: root.daemonReachable && root.vaultExists && !root.locked && !root.busy && root.draft.trim().length > 0

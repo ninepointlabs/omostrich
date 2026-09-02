@@ -90,7 +90,7 @@ the bar first.
 
 ## How it's built
 
-**The daemon** (`src/daemon.mjs`) is the only process that ever holds
+**The daemon** (`daemon/daemon.mjs`) is the only process that ever holds
 your decrypted private key, and only in memory, and only while
 unlocked. It:
 
@@ -141,14 +141,16 @@ unlocked. It:
   `ReadWritePaths=` limited to exactly the two directories it actually
   needs.
 
-**The plugin** (`plugin/`) is Quickshell QML for the Omarchy shell. It
-never imports a key, never decrypts anything, never touches the socket
-protocol directly — every single action shells out to `omostrich-ctl`
-and reads back a JSON response. If you never trust anything else in
-this repo, that's the one property worth verifying yourself: grep the
-QML for `nsec` and you'll find it only ever appears as something typed
-into a field and handed straight to a subprocess's stdin, never stored,
-never logged, never held longer than it takes to write it to that pipe.
+**The plugin** (`manifest.json`, `Panel.qml`, `ComposeOverlay.qml`,
+`LockIcon.qml` at the repo root) is Quickshell QML for the Omarchy
+shell. It never imports a key, never decrypts anything, never touches
+the socket protocol directly — every single action shells out to
+`omostrich-ctl` and reads back a JSON response. If you never trust
+anything else in this repo, that's the one property worth verifying
+yourself: grep the QML for `nsec` and you'll find it only ever appears
+as something typed into a field and handed straight to a subprocess's
+stdin, never stored, never logged, never held longer than it takes to
+write it to that pipe.
 
 ## Security model, plainly
 
@@ -174,41 +176,41 @@ never logged, never held longer than it takes to write it to that pipe.
 
 ## Install
 
-Requires Node (resolved via `~/.local/share/mise/shims/node`) and
+Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
+`volta`, whatever puts `node` on your `PATH`) and
 [Omarchy](https://omarchy.org).
 
 ```bash
 git clone https://github.com/ninepointlabs/omostrich ~/Projects/omostrich
 cd ~/Projects/omostrich
 npm ci                # installs exactly what's pinned in package-lock.json
-./install.sh           # installs + starts the systemd --user service, symlinks the CLI
-cd plugin
-./install.sh           # deploys the bar widget + Super+N overlay, adds it to your bar
+./install-daemon.sh   # installs + starts the systemd --user service, symlinks the CLI
+./install-plugin.sh   # deploys the bar widget + Super+N overlay, adds it to your bar
 ```
 
-`install.sh` (repo root) symlinks `omostrich.service` into
+`install-daemon.sh` symlinks `omostrich.service` into
 `~/.config/systemd/user/`, enables and starts it, and symlinks
 `bin/ctl.mjs` to `~/.local/bin/omostrich-ctl` (make sure `~/.local/bin`
 is on your `PATH`).
 
-`plugin/install.sh` copies **every** `*.qml` file, `*.png`, and
-`manifest.json` into `~/.config/omarchy/plugins/omostrich/` — including
-`LockIcon.qml`, which is easy to forget if you ever copy plugin files
-by hand instead of running the script. `Panel.qml`'s bar-icon
-`iconComponent` instantiates `LockIcon` directly; without
-`LockIcon.qml` present in the deployed directory, Quickshell fails to
-draw the chip at all and you get a blank slot on the bar where the
-icon should be — this happened for real on this machine right after
-the repo rename, from a hand-copy that only grabbed `Panel.qml` +
-`ComposeOverlay.qml` + `ostrich.png` + `manifest.json` and missed
-`LockIcon.qml`. **Don't hand-copy a subset of files — always run
-`plugin/install.sh`**, which globs `*.qml` and picks up every QML file
-in the directory (currently `Panel.qml`, `ComposeOverlay.qml`, and
-`LockIcon.qml`) with nothing to remember or leave out. It also runs
-`omarchy bar put tim.omostrich` and restarts the Omarchy shell so the
-change is live.
+`install-plugin.sh` copies **every** `*.qml` file, `*.png`, and
+`manifest.json` from the repo root into
+`~/.config/omarchy/plugins/omostrich/` — including `LockIcon.qml`,
+which is easy to forget if you ever copy plugin files by hand instead
+of running the script. `Panel.qml`'s bar-icon `iconComponent`
+instantiates `LockIcon` directly; without `LockIcon.qml` present in
+the deployed directory, Quickshell fails to draw the chip at all and
+you get a blank slot on the bar where the icon should be — this
+happened for real on this machine right after an earlier repo rename,
+from a hand-copy that only grabbed `Panel.qml` + `ComposeOverlay.qml`
++ `ostrich.png` + `manifest.json` and missed `LockIcon.qml`. **Don't
+hand-copy a subset of files — always run `install-plugin.sh`**, which
+globs `*.qml` and picks up every QML file in the directory (currently
+`Panel.qml`, `ComposeOverlay.qml`, and `LockIcon.qml`) with nothing to
+remember or leave out. It also runs `omarchy bar put tim.omostrich`
+and restarts the Omarchy shell so the change is live.
 
-Re-run `plugin/install.sh` after any plugin edit — Quickshell doesn't
+Re-run `install-plugin.sh` after any plugin edit — Quickshell doesn't
 reliably pick up a changed QML file without a shell restart, which
 this script always does at the end.
 
@@ -222,11 +224,31 @@ o.bind("SUPER + N", "Omostrich compose", "omarchy-shell shell toggle tim.omostri
 Then open the bar icon, paste in an nsec and a passphrase, and you're
 set up.
 
+If you ever want to move the bar icon, remove it, or re-add it:
+
+```bash
+omarchy bar move tim.omostrich --section left   # move it
+omarchy bar put tim.omostrich --before omarchy.tray
+omarchy plugin disable tim.omostrich            # take it off the bar
+omarchy plugin enable tim.omostrich             # put it back
+```
+
+To uninstall:
+
+```bash
+omarchy plugin disable tim.omostrich
+rm -rf ~/.config/omarchy/plugins/omostrich
+systemctl --user disable --now omostrich.service
+rm ~/.config/systemd/user/omostrich.service ~/.local/bin/omostrich-ctl
+```
+
 ### Paths
 
 | What | Where |
 |---|---|
 | Repo | `~/Projects/omostrich` |
+| Plugin manifest + QML | repo root (`manifest.json`, `Panel.qml`, `ComposeOverlay.qml`, `LockIcon.qml`, `ostrich.png`) |
+| Daemon source | `daemon/` |
 | Encrypted vault + config + profile cache | `~/.local/share/omostrich/` |
 | Control socket, daemon log, notification dedup state | `~/.local/state/omarchy/omostrich/` |
 | CLI | `omostrich-ctl` (symlinked from `bin/ctl.mjs`) |
@@ -268,18 +290,19 @@ relays/settings, and approving/denying NIP-46 requests all stay bar-icon
 only — deliberately not reachable from any agent.
 
 **`bin/mcp.mjs` ships only in the git clone — it is NOT part of the
-deployed bar plugin.** `plugin/install.sh` copies `*.qml`, `*.png`, and
-`manifest.json` into `~/.config/omarchy/plugins/omostrich/` — that
-directory does not (and should never) contain `mcp.mjs`. **Installing
-the bar chip does not register MCP with anything.** Running
-`./install.sh` (daemon) and `plugin/install.sh` (bar icon) gets you a
-working chip and a running daemon, but Hermes and Claude Code have no
-idea Omostrich exists until you separately run the `mcp add` command
-below, pointing at the repo path directly (`~/Projects/omostrich/bin/mcp.mjs`)
-— not the plugin directory, which never has this file. So the full
-sequence for a new machine is: clone, `npm ci`, `./install.sh`
-(daemon), `plugin/install.sh` (bar icon) if you want the chip too, then
-`mcp add` per-agent as its own separate step.
+deployed bar plugin.** `install-plugin.sh` copies `*.qml`, `*.png`, and
+`manifest.json` from the repo root into
+`~/.config/omarchy/plugins/omostrich/` — that directory does not (and
+should never) contain `mcp.mjs`. **Installing the bar chip does not
+register MCP with anything.** Running `./install-daemon.sh` (daemon)
+and `./install-plugin.sh` (bar icon) gets you a working chip and a
+running daemon, but Hermes and Claude Code have no idea Omostrich
+exists until you separately run the `mcp add` command below, pointing
+at the repo path directly (`~/Projects/omostrich/bin/mcp.mjs`) — not
+the deployed plugin directory, which never has this file. So the full
+sequence for a new machine is: clone, `npm ci`, `./install-daemon.sh`
+(daemon), `./install-plugin.sh` (bar icon) if you want the chip too,
+then `mcp add` per-agent as its own separate step.
 
 `bin/mcp.mjs` talks to the exact same Unix control socket
 `omostrich-ctl` does — same daemon, same trust boundary, no separate
@@ -354,10 +377,10 @@ or if the daemon isn't running at all:
 daemon, they're the deal for using either path at all** (also in
 `SKILL.md`):
 
-- Only call `publish` when Tim has explicitly asked *that agent, in that
-  moment* to post *that* text. No auto-posting, no scheduled/cron posting,
+- Only call `publish` when the user has explicitly asked *that agent,
+  in that moment* to post *that* text. No auto-posting, no scheduled/cron posting,
   no posting as a side effect of some other task.
-- If the response is locked, tell Tim the vault is locked and to unlock
+- If the response is locked, tell the user the vault is locked and to unlock
   it from the Omostrich bar icon. Do not attempt to unlock it yourself —
   no agent has (or should ever construct) the passphrase.
 - Never print, log, or otherwise surface an nsec. No agent should ever
@@ -370,6 +393,54 @@ daemon, they're the deal for using either path at all** (also in
   replies, no quotes, no zaps sent from here.
 - Not a general-purpose key manager for other protocols — Nostr only.
 - Not a multi-account tool — one vault, one identity, by design.
+
+## Naming history
+
+This project's product name is **Omostrich** (Omarchy + ostrich) as of
+2026-09-03. Before that it was simply called "Nostr" — display strings
+changed first (2026-09-02), then the full rename followed: plugin id
+`tim.nostr-signer` -> `tim.omostrich`, repo directory
+`~/Projects/omarchy-nostr-signer` -> `~/Projects/omostrich`, GitHub repo
+`ninepointlabs/omarchy-nostr-signer` -> `ninepointlabs/omostrich` (renamed
+via `gh repo rename`, git history preserved), CLI `omarchy-nostr-signer-ctl`
+-> `omostrich-ctl`, systemd unit `omarchy-nostr-signer.service` ->
+`omostrich.service`, data dir `~/.local/share/omarchy-nostr-signer` ->
+`~/.local/share/omostrich`, state dir
+`~/.local/state/omarchy/nostr-signer` -> `~/.local/state/omarchy/omostrich`.
+The existing vault/config/profile-cache were migrated to the new data
+dir, not recreated — same key, same identity, no re-onboarding needed.
+
+Before that, this was two separate icons: `tim.nostr-signer` (lock/unlock,
+approvals, relays) and `tim.nostr-compose` (a standalone composer that
+called into the signer's control socket). Feedback after the composer's
+first real use was that a second icon just for typing a note was one chip
+too many for what it actually does, so compose lives at the top of this
+same dropdown (and, separately, in the `SUPER + N` overlay).
+`install-plugin.sh` cleans up both that old `tim.nostr-compose` icon and
+the pre-rename `tim.nostr-signer` install dir if either is still present
+from an earlier version.
+
+As of 2026-09-02, `manifest.json` and the plugin QML moved from a
+`plugin/` subdirectory to the repository root, and the daemon's source
+moved from `src/` to `daemon/` — the Omarchy plugin marketplace requires
+`manifest.json` at the repository root, which this repo's original
+layout (daemon and plugin as sibling directories) didn't satisfy.
+
+## Notes for future QML changes
+
+Built against the same Omarchy shell plugin contract as
+`omarchy-hermes-chat` — `PluginRegistry.qml` for the manifest schema, and
+the `qs.Ui` base components (`Panel`, `KeyboardPanel`, `BarIconButton`,
+`Button`, `TextField`, `PanelHero`, `PanelSectionHeader`,
+`PanelSeparator`) those sibling plugins already use. Compose uses Qt
+Quick Controls `TextArea` (qs.Ui has no multi-line field; same primitive
+as hey-calendar's journal editor) with qs.Ui.TextField chrome. The
+pending-count badge on the bar icon reuses the same small-badge-dot
+pattern as `TailscaleIcon.qml`'s warning indicator
+(`/usr/share/omarchy/shell/plugins/panels/tailscale/TailscaleIcon.qml`) —
+`BorderSurface` circle anchored to a corner, deliberately not a novel
+pattern. `omarchy plugin validate <folder>` (ships with Omarchy) checks
+the manifest against the current schema if something breaks later.
 
 ## License
 
