@@ -93,7 +93,7 @@ Panel {
     if (p && p.displayName) return p.displayName
     if (p && p.name) return p.name
     if (root.vaultExists && root.npub) return root.shortKey(root.npub)
-    return "Nostr"
+    return "Omostrich"
   }
   readonly property string profilePicture: (root.profile && root.profile.picture) ? root.profile.picture : ""
   readonly property bool canPost: !root.locked && root.vaultExists && root.daemonReachable && !root.busy && (root.draft.trim().length > 0 || !!(root.attachedBlob && root.attachedBlob.url))

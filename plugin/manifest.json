@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "tim.nostr-signer",
-  "name": "Nostr",
+  "name": "Omostrich",
   "version": "0.2.0",
   "author": "tim",
-  "description": "One Nostr bar chip: lock/unlock the local signer, compose and post a kind-1 note, review pending NIP-46 approvals, and manage relays/authorized apps. Also a compose-only hotkey overlay (SUPER + N) for posting without opening the bar dropdown.",
+  "description": "One Omostrich bar chip: lock/unlock the local signer, compose and post a kind-1 note, review pending NIP-46 approvals, and manage relays/authorized apps. Also a compose-only hotkey overlay (SUPER + N) for posting without opening the bar dropdown.",
   "kinds": [
     "bar-widget",
     "overlay"
@@ -14,7 +14,7 @@
     "overlay": "ComposeOverlay.qml"
   },
   "barWidget": {
-    "displayName": "Nostr",
+    "displayName": "Omostrich",
     "description": "Compose a note, unlock/lock the signer, review pending approvals, manage relays.",
     "category": "Security",
     "allowMultiple": false,
