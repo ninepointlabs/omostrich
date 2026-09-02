@@ -106,12 +106,19 @@ Item {
   // appear, not by reasoning about the QML alone. Matches Panel.qml's
   // existing runAction(cmd, payload, onDone, markBusy) signature, which
   // already had this right.
+  //
+  // Audit item 1 (HIGH): payload goes over stdin, not argv, matching
+  // Panel.qml's runAction. This overlay is compose-only and never sends
+  // an nsec/passphrase itself, but the note content still shouldn't sit
+  // in /proc/<pid>/cmdline for the life of the process any more than it
+  // has to, and keeping both runAction implementations on the identical
+  // pattern means a future change to this file can't silently reopen the
+  // argv exposure by copy-pasting the old shape.
   function runAction(cmd, payload, onDone, markBusy) {
     if (markBusy !== false) root.busy = true
-    var args = [root.nodeBin, root.ctlPath, cmd]
-    if (payload !== undefined) args.push(JSON.stringify(payload))
+    actionProcess.pendingPayload = payload !== undefined ? JSON.stringify(payload) + "\n" : ""
     actionProcess.onDoneCallback = onDone
-    actionProcess.command = args
+    actionProcess.command = [root.nodeBin, root.ctlPath, cmd]
     actionProcess.running = true
   }
 
@@ -157,8 +164,14 @@ Item {
   Process {
     id: actionProcess
     property var onDoneCallback: null
+    property string pendingPayload: ""
     running: false
     command: []
+    stdinEnabled: true
+    onStarted: {
+      if (pendingPayload) write(pendingPayload)
+      pendingPayload = ""
+    }
     stdout: StdioCollector {
       id: actionStdout
       waitForEnd: true

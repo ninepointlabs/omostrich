@@ -243,14 +243,32 @@ function lockNow(reason) {
 }
 
 // NDKNip46Backend's permission hook. Known apps (in config.clients) are
-// auto-approved for every method; anything else is queued for interactive
-// approve/deny from the panel, and auto-denied if nobody answers in time —
-// a silent signer should never sit there indefinitely waiting on a human.
+// auto-approved, but only for methods they were actually granted — see
+// resolvePending's remember handling below (audit item 3: "Always allow"
+// used to grant a pubkey every method forever with a single click).
+// Anything not pre-granted is queued for interactive approve/deny from
+// the panel, and auto-denied if nobody answers in time — a silent signer
+// should never sit there indefinitely waiting on a human.
 async function permitCallback({ id, pubkey, method, params }) {
-  if (config.clients[pubkey]) {
+  const grantedMethods = config.clients[pubkey]?.methods;
+  if (Array.isArray(grantedMethods) && grantedMethods.includes(method)) {
     touchActivity();
     return true;
   }
+
+  // Audit item 3 (MEDIUM): the pending list used to show only
+  // `pubkey — method`, so approving a sign_event request (the one method
+  // that actually produces a public, permanent artifact) was done blind
+  // — no indication of what would actually be signed. NDK passes the
+  // full NDKEvent as `params` for sign_event specifically (see
+  // sign-event.ts); every other method's params is either absent or not
+  // event-shaped, so this only ever surfaces real content, never
+  // undefined/garbage. Never logged/shown for anything BUT the event
+  // about to be signed — no secret material flows through `params` for
+  // any NIP-46 method.
+  const kind = (params && typeof params === "object" && Number.isInteger(params.kind)) ? params.kind : null;
+  const rawContent = (params && typeof params === "object" && typeof params.content === "string") ? params.content : "";
+  const contentPreview = rawContent ? (rawContent.length > 80 ? rawContent.slice(0, 80) + "…" : rawContent) : "";
 
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -259,9 +277,9 @@ async function permitCallback({ id, pubkey, method, params }) {
       resolve(false);
     }, PENDING_TIMEOUT_MS);
 
-    const entry = { id, pubkey, method, params, createdAt: new Date().toISOString(), resolve, timer };
+    const entry = { id, pubkey, method, kind, contentPreview, createdAt: new Date().toISOString(), resolve, timer };
     pending.set(id, entry);
-    server.broadcast("pending_added", { id, pubkey, method, createdAt: entry.createdAt });
+    server.broadcast("pending_added", { id, pubkey, method, kind, contentPreview, createdAt: entry.createdAt });
   });
 }
 
@@ -272,7 +290,21 @@ function resolvePending(id, approved, { remember, label } = {}) {
   pending.delete(id);
 
   if (approved && remember) {
-    config.clients[entry.pubkey] = { label: label || "Unnamed app", addedAt: new Date().toISOString() };
+    // Audit item 3 (MEDIUM): scoped to the specific method just approved,
+    // not every method forever. "Always allow" on a sign_event request no
+    // longer silently also grants get_public_key/connect/etc. for that
+    // pubkey — each method has to be individually remembered the first
+    // time it's actually requested and approved. Merges into any existing
+    // grant list for that pubkey rather than replacing it, so approving a
+    // second method later adds to, not resets, what's already trusted.
+    const existing = config.clients[entry.pubkey];
+    const methods = Array.isArray(existing?.methods) ? existing.methods.slice() : [];
+    if (!methods.includes(entry.method)) methods.push(entry.method);
+    config.clients[entry.pubkey] = {
+      label: label || existing?.label || "Unnamed app",
+      addedAt: existing?.addedAt || new Date().toISOString(),
+      methods,
+    };
     configStore.save(config);
   }
 
@@ -299,7 +331,7 @@ function status() {
     notificationsEnabled: config.notificationsEnabled !== false,
     autoLockMinutes: config.autoLockMinutes,
     clients: config.clients,
-    pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, createdAt: p.createdAt })),
+    pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, kind: p.kind, contentPreview: p.contentPreview, createdAt: p.createdAt })),
     profile: profilePayload(),
     bunkerUrl: bunkerUrl(),
     nip46Relays: nip46RelayList(),
@@ -339,7 +371,19 @@ async function signInternal(eventTemplate) {
   const signer = new NDKPrivateKeySigner(skBytes);
   const event = { ...eventTemplate, pubkey: pubkeyHex };
   const signature = await signer.sign(event);
-  touchActivity();
+  // Audit item 2 (HIGH): does NOT call touchActivity() itself. That
+  // decision belongs to whichever caller actually represents real user
+  // activity — publishNote() below calls it explicitly for that reason —
+  // not to this low-level signing primitive that every path through the
+  // daemon shares, including the ungated `sign_internal` control command
+  // (no approval prompt at all, by the control socket's own trust model:
+  // anything running as this user can already reach it). Before this
+  // fix, a compromised same-UID process polling `sign_internal` in a loop
+  // could both harvest unlimited signatures silently AND keep resetting
+  // the auto-lock timer to stay open indefinitely while doing it. Now the
+  // vault auto-locks on schedule regardless of how often this path runs.
+  const contentHash = crypto.createHash("sha256").update(String(event.content ?? "")).digest("hex").slice(0, 16);
+  log(`sign_internal kind=${event.kind} id=${event.id} content_sha256=${contentHash} len=${String(event.content ?? "").length}`);
   return { ...event, sig: signature, id: event.id };
 }
 
@@ -419,6 +463,11 @@ async function publishNote(content, extra = {}) {
     .join(", ");
   log(`published kind-1 ${signed.id} (${text.length} chars): ${perRelayLine}`);
   for (const f of failed) log(`  publish failure ${f.url}: ${f.error}`);
+
+  // Real, user-initiated action (Tim asked to post this specific note) —
+  // unlike the bare sign_internal path above, this is exactly the kind of
+  // activity that should extend the unlock window.
+  touchActivity();
 
   return { event: signed, publishedTo, failed };
 }

@@ -145,10 +145,19 @@ Panel {
     if (markBusy !== false) root.busy = true
     root.errorText = ""
     root.statusText = ""
-    var args = [root.nodeBin, root.ctlPath, cmd]
-    if (payload !== undefined) args.push(JSON.stringify(payload))
+    // Audit item 1 (HIGH): payload goes over stdin now, never argv — a
+    // literal JSON.stringify(payload) argv element used to put nsec/
+    // passphrase in plain sight of /proc/<pid>/cmdline and `ps aux` for
+    // any other process running as this user, for the life of the child.
+    // Matches the stock network plugin's own enterpriseConnect Process
+    // (Panel.qml in omarchy's network widget): stdinEnabled + write() on
+    // onStarted, same "password never touches argv" reasoning. ctl.mjs
+    // reads one line from stdin (or races a short timeout if nothing
+    // arrives) since Quickshell's Process has no stdin-close/EOF API to
+    // signal "that's everything" from QML.
+    actionProcess.pendingPayload = payload !== undefined ? JSON.stringify(payload) + "\n" : ""
     actionProcess.onDoneCallback = onDone
-    actionProcess.command = args
+    actionProcess.command = [root.nodeBin, root.ctlPath, cmd]
     actionProcess.running = true
   }
 
@@ -376,8 +385,14 @@ Panel {
   Process {
     id: actionProcess
     property var onDoneCallback: null
+    property string pendingPayload: ""
     running: false
     command: []
+    stdinEnabled: true
+    onStarted: {
+      if (pendingPayload) write(pendingPayload)
+      pendingPayload = ""
+    }
     stdout: StdioCollector {
       id: actionStdout
       waitForEnd: true
@@ -927,16 +942,39 @@ Panel {
                     Text {
                       width: parent.width
                       text: root.shortKey(modelData.pubkey) + " — " + modelData.method
+                        + (modelData.kind !== null && modelData.kind !== undefined ? " (kind " + modelData.kind + ")" : "")
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       elide: Text.ElideRight
                     }
 
+                    // Audit item 3 (MEDIUM): only ever populated for
+                    // sign_event (the one method that produces a public,
+                    // permanent artifact) — see permitCallback's own
+                    // comment in daemon.mjs. Approving anything else
+                    // (connect/get_public_key/ping/switch_relays) never
+                    // had content to preview in the first place, so this
+                    // row simply doesn't render for those.
+                    Text {
+                      visible: modelData.contentPreview !== undefined && modelData.contentPreview !== ""
+                      width: parent.width
+                      wrapMode: Text.WordWrap
+                      text: "“" + modelData.contentPreview + "”"
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      font.italic: true
+                    }
+
                     Row {
                       spacing: Style.space(6)
                       Button { text: "Approve once"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, false) }
-                      Button { text: "Always allow"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, true) }
+                      // Audit item 3 (MEDIUM): scoped to this one method
+                      // now, not every method forever — label says so
+                      // plainly rather than leaving that a surprise
+                      // buried in daemon.mjs. See resolvePending() there.
+                      Button { text: "Always allow " + modelData.method; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, true) }
                       Button { text: "Deny"; foreground: root.urgent; bordered: true; onClicked: root.deny(modelData.id) }
                     }
                   }

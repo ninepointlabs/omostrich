@@ -41,7 +41,7 @@ daemon that panel talks to.
 ## Setup
 
 ```bash
-npm install          # already done
+npm ci            # installs exactly what's in package-lock.json
 ./install.sh          # symlinks + enables the systemd --user service, plus the CLI symlink below
 ```
 
