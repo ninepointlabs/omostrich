@@ -50,6 +50,7 @@ Panel {
   property string attachPath: ""
   property var attachedBlob: null
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/nostr-signer/clipboard.png"
+  property bool settingsExpanded: false
   property bool autoLockUserPicked: false
   // What the picker currently shows. Seeded from the daemon's last-known
   // autoLockMinutes each time the dropdown opens (so it reflects Tim's
