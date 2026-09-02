@@ -11,6 +11,15 @@ OLD_SIGNER_TARGET="$HOME/.config/omarchy/plugins/nostr-signer"
 # walks real directories, not into ~/Projects through a dir symlink);
 # per-file symlinks didn't reliably work either. Copying means re-running
 # this script is what deploys an edit — there is no live-symlink shortcut.
+#
+# The *.qml glob below covers every QML file in this directory, currently
+# Panel.qml, ComposeOverlay.qml, AND LockIcon.qml — do not replace this
+# with a hand-picked file list. Panel.qml's bar-icon iconComponent
+# instantiates LockIcon directly; a deploy that omits LockIcon.qml (e.g.
+# a manual `cp Panel.qml ComposeOverlay.qml ostrich.png manifest.json`)
+# leaves Quickshell unable to draw the bar chip at all — a blank slot
+# where the icon should be. This happened for real on this machine
+# right after the repo rename, from exactly that kind of hand-copy.
 mkdir -p "$TARGET"
 cp "$DIR"/*.qml "$DIR"/*.png "$DIR"/manifest.json "$TARGET/"
 

@@ -191,11 +191,26 @@ cd plugin
 `bin/ctl.mjs` to `~/.local/bin/omostrich-ctl` (make sure `~/.local/bin`
 is on your `PATH`).
 
-`plugin/install.sh` copies the plugin's QML/manifest/icon into
-`~/.config/omarchy/plugins/omostrich/`, runs `omarchy bar put
-tim.omostrich`, and restarts the Omarchy shell so the change is live.
-Re-run it after any plugin edit — Quickshell doesn't reliably pick up a
-changed QML file without a shell restart.
+`plugin/install.sh` copies **every** `*.qml` file, `*.png`, and
+`manifest.json` into `~/.config/omarchy/plugins/omostrich/` — including
+`LockIcon.qml`, which is easy to forget if you ever copy plugin files
+by hand instead of running the script. `Panel.qml`'s bar-icon
+`iconComponent` instantiates `LockIcon` directly; without
+`LockIcon.qml` present in the deployed directory, Quickshell fails to
+draw the chip at all and you get a blank slot on the bar where the
+icon should be — this happened for real on this machine right after
+the repo rename, from a hand-copy that only grabbed `Panel.qml` +
+`ComposeOverlay.qml` + `ostrich.png` + `manifest.json` and missed
+`LockIcon.qml`. **Don't hand-copy a subset of files — always run
+`plugin/install.sh`**, which globs `*.qml` and picks up every QML file
+in the directory (currently `Panel.qml`, `ComposeOverlay.qml`, and
+`LockIcon.qml`) with nothing to remember or leave out. It also runs
+`omarchy bar put tim.omostrich` and restarts the Omarchy shell so the
+change is live.
+
+Re-run `plugin/install.sh` after any plugin edit — Quickshell doesn't
+reliably pick up a changed QML file without a shell restart, which
+this script always does at the end.
 
 Add the `SUPER + N` overlay bind to your own
 `~/.config/hypr/bindings.lua`:
