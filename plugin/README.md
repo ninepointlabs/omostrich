@@ -1,51 +1,72 @@
-# Nostr (Omarchy plugin)
+# Omostrich (Omarchy plugin)
 
 A single bar icon for the Omarchy shell (Quickshell): compose and post a
 kind-1 Nostr note, unlock/lock the local signer, review pending NIP-46
 approvals, manage authorized apps, and edit your relay list — all in one
-dropdown.
+dropdown. Plus a compose-only hotkey overlay (`SUPER + N`) for posting
+without opening the bar dropdown at all.
 
 This is desktop plumbing, not a Nostr client. There is no timeline, no
 replies, no zaps, no feed of any kind. Image attach is Blossom upload
 only — the daemon PUTs the blob, the note gets a URL.
 
-## Merge history
+## Naming history
 
-This used to be two separate icons: `tim.nostr-signer` (lock/unlock,
+This plugin's product name is **Omostrich** (Omarchy + ostrich) as of
+2026-09-03. Before that it was simply called "Nostr" — display strings
+changed first (2026-09-02), then the full rename followed: plugin id
+`tim.nostr-signer` -> `tim.omostrich`, repo directory
+`~/Projects/omarchy-nostr-signer` -> `~/Projects/omostrich`, GitHub repo
+`ninepointlabs/omarchy-nostr-signer` -> `ninepointlabs/omostrich` (renamed
+via `gh repo rename`, git history preserved), CLI `omarchy-nostr-signer-ctl`
+-> `omostrich-ctl`, systemd unit `omarchy-nostr-signer.service` ->
+`omostrich.service`, data dir `~/.local/share/omarchy-nostr-signer` ->
+`~/.local/share/omostrich`, state dir
+`~/.local/state/omarchy/nostr-signer` -> `~/.local/state/omarchy/omostrich`.
+The existing vault/config/profile-cache were migrated to the new data
+dir, not recreated — same key, same identity, no re-onboarding needed.
+
+Before that, this was two separate icons: `tim.nostr-signer` (lock/unlock,
 approvals, relays) and `tim.nostr-compose` (a standalone composer that
 called into the signer's control socket). Feedback after the composer's
 first real use was that a second icon just for typing a note was one chip
-too many for what it actually does, so compose now lives at the top of this
-same dropdown. The plugin id stays `tim.nostr-signer` — same bar slot, same
-identity, no re-onboarding needed. `install.sh` here also retires the old
-`tim.nostr-compose` icon if it's still present from before the merge.
+too many for what it actually does, so compose lives at the top of this
+same dropdown (and, separately, in the `SUPER + N` overlay). `install.sh`
+here cleans up both that old `tim.nostr-compose` icon and the pre-rename
+`tim.nostr-signer` install dir if either is still present from an earlier
+version.
 
 ## What it does
 
-- **Bar icon** — a padlock mark; open/closed reflects locked state, dims
+- **Bar icon** — an ostrich mark; open/closed reflects locked state, dims
   when the signer daemon is unreachable, and shows a small red badge with a
   count when NIP-46 approval requests are pending.
-- **Compose** (shown once unlocked, at the top of the dropdown) — a wrapping
-  field that grows with the note. Enter (or the Post button) posts a kind-1
-  text note; Shift+Enter inserts a newline. Calls the signer's `publish`
-  command, which signs and broadcasts to every configured relay and reports
-  back per-relay success/failure.
-- **Lock / unlock / import** — the original signer setup and unlock flow,
-  unchanged.
-- **Pending requests** — approve once, always allow, or deny an incoming
-  NIP-46 (remote signing) request.
+- **Compose** (shown once unlocked, at the top of the dropdown, and in the
+  `SUPER + N` overlay) — a wrapping field that grows with the note. Enter
+  (or the Post button) posts a kind-1 text note; Shift+Enter inserts a
+  newline. Calls the signer's `publish` command, which signs and
+  broadcasts to every configured relay and reports back per-relay
+  success/failure.
+- **Lock / unlock / import** — pick how long an unlock lasts (5m / 30m /
+  1h / 12h / 24h) right on the unlock form; the choice persists as the
+  next default.
+- **Pending requests** — approve once, always allow (scoped to that one
+  method, not every method forever), or deny an incoming NIP-46 (remote
+  signing) request. Shows the event kind and a content preview for
+  `sign_event` requests specifically.
 - **Authorized apps** — see and revoke apps that were "always allow"'d.
 - **Relays** — edit the comma-separated relay list.
 - **Blossom** — one media server URL (same config.json as relays). Path
-  field or paste-from-clipboard (wl-paste, same as the Omarchy clipboard
-  plugin). Preview + URL; on post the daemon appends the URL to the kind-1
-  (imeta tag if the blob hash is known). Empty blossom URL = no upload.
+  field, paste-from-clipboard (wl-paste, same as the Omarchy clipboard
+  plugin), or a real `zenity` file picker. Preview + URL; on post the
+  daemon appends the URL to the kind-1 (imeta tag if the blob hash is
+  known). Empty blossom URL = no upload.
 
 ## Dependencies
 
-- [`omarchy-nostr-signer`](https://github.com/ninepointlabs/omarchy-nostr-signer)
+- [`omostrich`](https://github.com/ninepointlabs/omostrich)
   (the daemon in the parent directory of this plugin) installed and running
-  (`systemctl --user status omarchy-nostr-signer.service`). This plugin
+  (`systemctl --user status omostrich.service`). This plugin
   never holds an nsec or imports one — it only talks to that daemon's
   control socket.
 - Node (resolved via `~/.local/share/mise/shims/node`) to run the signer's
@@ -61,10 +82,10 @@ No Nostr library, relay connection, or key material lives in this plugin —
 ```
 
 This copies the plugin's files into
-`~/.config/omarchy/plugins/nostr-signer`, retires the old separate
-`tim.nostr-compose` icon if present, runs `omarchy bar put tim.nostr-signer`
-(a no-op if it's already on the bar, which it will be for anyone upgrading
-from the pre-merge version), then runs `omarchy restart shell`.
+`~/.config/omarchy/plugins/omostrich`, retires the old separate
+`tim.nostr-compose` icon and the pre-rename `tim.nostr-signer` install if
+present, runs `omarchy bar put tim.omostrich` (a no-op if it's already on
+the bar), then runs `omarchy restart shell`.
 
 **Re-run `./install.sh` after every edit.** Files are copied, not
 symlinked — there's no live-reload shortcut here, and neither the
@@ -77,10 +98,10 @@ unaffected.
 If you ever want to move it, remove it from the bar, or re-add it:
 
 ```bash
-omarchy bar move tim.nostr-signer --section left   # move it
-omarchy bar put tim.nostr-signer --before omarchy.tray
-omarchy plugin disable tim.nostr-signer            # take it off the bar
-omarchy plugin enable tim.nostr-signer             # put it back
+omarchy bar move tim.omostrich --section left   # move it
+omarchy bar put tim.omostrich --before omarchy.tray
+omarchy plugin disable tim.omostrich            # take it off the bar
+omarchy plugin enable tim.omostrich             # put it back
 ```
 
 ## v1 scope
@@ -89,19 +110,20 @@ Deliberately narrow, per the build plan this came out of:
 
 - Kind-1 text notes only. No replies, quotes, zaps, media, or feeds.
 - No timeline or reading UI of any kind — compose-and-dismiss only.
-- No mentions/DM/zap notifications (a separate later step).
+- Mentions/DM/zap desktop notifications exist (toggle in settings), but
+  there's still no inbox or feed UI for them — toast only.
 - No key handling whatsoever; every signature and every publish happens on
-  `omarchy-nostr-signer`'s side of the control socket.
+  `omostrich`'s side of the control socket.
 
 ## Uninstall
 
 ```bash
-omarchy plugin disable tim.nostr-signer
-rm -rf ~/.config/omarchy/plugins/nostr-signer
+omarchy plugin disable tim.omostrich
+rm -rf ~/.config/omarchy/plugins/omostrich
 ```
 
 This does not touch the signer daemon or your vault — see the parent
-`omarchy-nostr-signer` repo's own README to uninstall that separately.
+`omostrich` repo's own README to uninstall that separately.
 
 ## Notes for future changes
 

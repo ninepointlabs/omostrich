@@ -3,8 +3,8 @@ import path from "node:path";
 
 const home = os.homedir();
 
-export const dataDir = path.join(home, ".local", "share", "omarchy-nostr-signer");
-export const stateDir = path.join(home, ".local", "state", "omarchy", "nostr-signer");
+export const dataDir = path.join(home, ".local", "share", "omostrich");
+export const stateDir = path.join(home, ".local", "state", "omarchy", "omostrich");
 
 export const vaultPath = path.join(dataDir, "vault.json");
 export const configPath = path.join(dataDir, "config.json");

@@ -36,7 +36,7 @@ Item {
   property string draft: ""
 
   readonly property string nodeBin: Quickshell.env("HOME") + "/.local/share/mise/shims/node"
-  readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omarchy-nostr-signer/bin/ctl.mjs"
+  readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omostrich/bin/ctl.mjs"
   readonly property int softLimit: 700
   readonly property bool canPost: root.daemonReachable && root.vaultExists && !root.locked && !root.busy && root.draft.trim().length > 0
   // The compose TextArea only exists in the visible tree once the async
@@ -72,7 +72,7 @@ Item {
   function dismiss() {
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
-      root.shell.hide((root.manifest && root.manifest.id) || "tim.nostr-signer")
+      root.shell.hide((root.manifest && root.manifest.id) || "tim.omostrich")
   }
 
   function toggle() {

@@ -1,10 +1,10 @@
 [Unit]
-Description=Omarchy Nostr signer daemon
+Description=Omostrich (Nostr signer) daemon
 After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/share/mise/shims/node %h/Projects/omarchy-nostr-signer/src/daemon.mjs
+ExecStart=%h/.local/share/mise/shims/node %h/Projects/omostrich/src/daemon.mjs
 Restart=on-failure
 RestartSec=2
 
@@ -31,7 +31,7 @@ ProtectHome=read-only
 # ProtectHome=read-only would otherwise block that read entirely, which
 # is why %h itself needs to stay readable and only the two specific
 # writable dirs below are opened up for writing).
-ReadWritePaths=%h/.local/share/omarchy-nostr-signer %h/.local/state/omarchy/nostr-signer
+ReadWritePaths=%h/.local/share/omostrich %h/.local/state/omarchy/omostrich
 
 [Install]
 WantedBy=default.target
