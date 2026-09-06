@@ -601,6 +601,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.errorText !== ""
             width: parent.width
             text: root.errorText
@@ -611,6 +612,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.errorText === "" && root.statusText !== ""
             width: parent.width
             text: root.statusText
@@ -686,6 +688,7 @@ Panel {
             Row {
               width: parent.width
               Text {
+                textFormat: Text.PlainText
                 text: root.draft.length + (root.draft.length > root.softLimit ? " (long note)" : "")
                 color: root.draft.length > root.softLimit ? root.urgent : root.dim
                 font.family: root.fontFamily
@@ -694,6 +697,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               visible: !root.blossomUrl
               width: parent.width
               wrapMode: Text.WordWrap
@@ -765,6 +769,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width - Style.space(56)
                   wrapMode: Text.WrapAnywhere
                   text: (root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : ""
@@ -793,6 +798,7 @@ Panel {
             spacing: Style.space(8)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: "Import an existing nsec. It's encrypted at rest with the passphrase below and only ever decrypted in memory while unlocked."
               color: root.dim
@@ -856,6 +862,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               text: "Stay unlocked for"
               color: root.dim
               font.family: root.fontFamily
@@ -896,6 +903,7 @@ Panel {
               onClicked: root.nip46ManualExpand = !root.nip46ManualExpand
 
               Text {
+                textFormat: Text.PlainText
                 id: nip46SummaryText
                 width: parent.width
                 text: root.nip46Summary
@@ -915,6 +923,7 @@ Panel {
               PanelSectionHeader { text: "REMOTE SIGNING (NIP-46)"; foreground: root.foreground; fontFamily: root.fontFamily }
 
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Paste this into a NIP-46 client (Amber, nsec.app, etc.) to request signatures from this signer. Every request still needs your approve/deny below."
@@ -928,6 +937,7 @@ Panel {
                 spacing: Style.space(6)
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width - copyBunkerButton.width - parent.spacing
                   text: root.bunkerUrl
                   color: root.dim
@@ -961,6 +971,7 @@ Panel {
                     spacing: Style.space(4)
 
                     Text {
+                      textFormat: Text.PlainText
                       width: parent.width
                       text: root.shortKey(modelData.pubkey) + " — " + modelData.method
                         + (modelData.kind !== null && modelData.kind !== undefined ? " (kind " + modelData.kind + ")" : "")
@@ -977,10 +988,24 @@ Panel {
                     // (connect/get_public_key/ping/switch_relays) never
                     // had content to preview in the first place, so this
                     // row simply doesn't render for those.
+                    //
+                    // Marketplace review (#4458): this string is attacker-
+                    // controlled (a stranger's unsigned note body) and is
+                    // shown BEFORE approval. Text.PlainText is mandatory
+                    // here: with the AutoText default Qt would sniff for
+                    // markup and could interpret <img>/<a href=file:...>
+                    // etc. inside the shell before the user ever clicked.
+                    // The daemon also flattens whitespace/control chars
+                    // (previewText) so the row cannot grow unbounded and
+                    // shove Approve/Deny off-screen. maximumLineCount is
+                    // a second belt for the same thing.
                     Text {
+                      textFormat: Text.PlainText
                       visible: modelData.contentPreview !== undefined && modelData.contentPreview !== ""
                       width: parent.width
                       wrapMode: Text.WordWrap
+                      maximumLineCount: 3
+                      elide: Text.ElideRight
                       text: "“" + modelData.contentPreview + "”"
                       color: root.dim
                       font.family: root.fontFamily
@@ -1018,6 +1043,7 @@ Panel {
                     spacing: Style.space(8)
 
                     Text {
+                      textFormat: Text.PlainText
                       width: parent.width - revokeButton.width - Style.space(8)
                       text: (root.clients[modelData].label || "Unnamed app") + " — " + root.shortKey(modelData)
                       color: root.foreground
@@ -1061,6 +1087,7 @@ Panel {
               onClicked: root.settingsExpanded = !root.settingsExpanded
 
               Text {
+                textFormat: Text.PlainText
                 id: settingsSummaryText
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
@@ -1097,6 +1124,7 @@ Panel {
               PanelSectionHeader { text: "BLOSSOM"; foreground: root.foreground; fontFamily: root.fontFamily }
 
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "One media server for v1. Leave blank to disable uploads."
@@ -1137,6 +1165,7 @@ Panel {
               PanelSectionHeader { text: "AUTO-LOCK"; foreground: root.foreground; fontFamily: root.fontFamily }
 
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: "Currently locks after " + root.autoLockLabel(root.autoLockMinutes) + " idle."
                 color: root.dim

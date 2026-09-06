@@ -65,6 +65,7 @@ Item {
     borderSpec: Border.flat(Color.popups.background, 1)
 
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: root.pendingCount > 9 ? "9+" : String(root.pendingCount)
       color: Color.background
