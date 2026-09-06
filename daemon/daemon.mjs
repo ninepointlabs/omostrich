@@ -249,6 +249,30 @@ function lockNow(reason) {
 // Anything not pre-granted is queued for interactive approve/deny from
 // the panel, and auto-denied if nobody answers in time — a silent signer
 // should never sit there indefinitely waiting on a human.
+
+// Marketplace review (#4458): the preview is attacker-controlled — it is
+// the literal `content` of whatever a remote NIP-46 client asked us to
+// sign, shown BEFORE the user approves. Reduce it to something safe to
+// put in a UI label regardless of what the QML sink does with it:
+//   - collapse all whitespace (newlines/tabs) to single spaces so a
+//     hostile note cannot push the Approve/Deny row off-screen
+//   - strip C0/C1 control chars and Unicode line/paragraph separators
+//   - cap by *code points*, not UTF-16 units, so we never split a
+//     surrogate pair and emit an invalid string
+// The QML side additionally renders it with Text.PlainText so `<`, `&`,
+// `file:` etc. are inert even if this function ever regresses.
+const PREVIEW_MAX = 80;
+function previewText(s) {
+  if (typeof s !== "string" || s === "") return "";
+  const cleaned = s
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned === "") return "";
+  const cps = Array.from(cleaned);
+  return cps.length > PREVIEW_MAX ? cps.slice(0, PREVIEW_MAX).join("") + "…" : cleaned;
+}
+
 async function permitCallback({ id, pubkey, method, params }) {
   const grantedMethods = config.clients[pubkey]?.methods;
   if (Array.isArray(grantedMethods) && grantedMethods.includes(method)) {
@@ -268,7 +292,7 @@ async function permitCallback({ id, pubkey, method, params }) {
   // any NIP-46 method.
   const kind = (params && typeof params === "object" && Number.isInteger(params.kind)) ? params.kind : null;
   const rawContent = (params && typeof params === "object" && typeof params.content === "string") ? params.content : "";
-  const contentPreview = rawContent ? (rawContent.length > 80 ? rawContent.slice(0, 80) + "…" : rawContent) : "";
+  const contentPreview = previewText(rawContent);
 
   return new Promise((resolve) => {
     const timer = setTimeout(() => {

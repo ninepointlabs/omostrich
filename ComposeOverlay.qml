@@ -327,6 +327,7 @@ Item {
             spacing: Style.space(8)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: !root.daemonReachable ? "Signer daemon unreachable. Check the service, then try again."
@@ -346,6 +347,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.checking
             width: parent.width
             text: "Checking signer…"
@@ -447,6 +449,7 @@ Item {
             Row {
               width: parent.width
               Text {
+                textFormat: Text.PlainText
                 text: root.draft.length + (root.draft.length > root.softLimit ? " (long note)" : "")
                 color: root.draft.length > root.softLimit ? root.urgent : root.dim
                 font.family: root.fontFamily
@@ -476,6 +479,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.errorText !== ""
             width: parent.width
             wrapMode: Text.WordWrap
@@ -486,6 +490,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.errorText === "" && root.statusText !== ""
             width: parent.width
             wrapMode: Text.WordWrap
@@ -496,6 +501,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.WordWrap
             text: "Esc to dismiss · Enter to post · Shift+Enter for a newline"
