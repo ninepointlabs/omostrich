@@ -4,7 +4,7 @@
   "name": "Omostrich",
   "version": "0.2.0",
   "author": "tim",
-  "description": "One Omostrich bar chip: lock/unlock the local signer, compose and post a kind-1 note, review pending NIP-46 approvals, and manage relays/authorized apps. Also a compose-only hotkey overlay (SUPER + N) for posting without opening the bar dropdown.",
+  "description": "Local Nostr signer and note composer for Omarchy. One bar chip to unlock your locally encrypted Nostr key, compose and post kind-1 notes, approve NIP-46 signing requests from other Nostr apps, and manage relays and authorized apps. Plus a compose-only hotkey overlay (SUPER + N). Not a feed or client; your private key never leaves the local vault.",
   "kinds": [
     "bar-widget",
     "overlay"
@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "Omostrich",
-    "description": "Compose a note, unlock/lock the signer, review pending approvals, manage relays.",
+    "description": "Nostr: compose a note, unlock/lock the signer, review NIP-46 approvals, manage relays.",
     "category": "Security",
     "allowMultiple": false,
     "defaultSection": "right",
