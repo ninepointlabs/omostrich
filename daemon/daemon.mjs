@@ -149,7 +149,8 @@ const notifyWatch = createNotifyWatch({
 function touchActivity() {
   if (!skBytes) return;
   if (autoLockTimer) clearTimeout(autoLockTimer);
-  const minutes = Number(config.autoLockMinutes) > 0 ? Number(config.autoLockMinutes) : 15;
+  const minutes = Number(config.autoLockMinutes);
+  if (!(minutes > 0)) return; // 0 or negative = disabled, never auto-lock
   autoLockTimer = setTimeout(() => lockNow("auto-lock timeout"), minutes * 60_000);
 }
 
@@ -449,12 +450,13 @@ async function publishNote(content, extra = {}) {
   if (!text) throw new Error("content required");
   if (!Array.isArray(config.relays) || config.relays.length === 0) throw new Error("no relays configured");
 
-  const tags = blob ? blossom.imetaTags({
+  const baseTags = (Array.isArray(extra.tags) ? extra.tags : []);
+  const tags = blob ? baseTags.concat(blossom.imetaTags({
     url: blob.url,
     sha256: blob.sha256,
     mime: blob.mime,
     size: blob.size,
-  }) : [];
+  })) : baseTags;
 
   const signed = await signInternal({
     kind: 1,
@@ -542,7 +544,7 @@ async function handleCommand(cmd, req) {
 
     case "set_autolock": {
       const minutes = Number(req.minutes);
-      if (!Number.isFinite(minutes) || minutes <= 0) throw new Error("minutes must be a positive number");
+      if (!Number.isFinite(minutes) || minutes < 0) throw new Error("minutes must be 0 (disabled) or a positive number");
       config.autoLockMinutes = minutes;
       configStore.save(config);
       touchActivity();
@@ -574,7 +576,7 @@ async function handleCommand(cmd, req) {
       return signInternal(req.event);
 
     case "publish":
-      return publishNote(req.content, { blossom: req.blossom });
+      return publishNote(req.content, { blossom: req.blossom, tags: req.tags });
 
     case "set_blossom": {
       config.blossomUrl = blossom.normalizeBlossomUrl(req.url);

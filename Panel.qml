@@ -91,6 +91,7 @@ Panel {
   // to before this slice existed. Value is the literal minutes count sent
   // straight to `set_autolock`; label is what the chip displays.
   readonly property var autoLockOptions: [
+    { value: "0", label: "Never" },
     { value: "5", label: "5m" },
     { value: "30", label: "30m" },
     { value: "60", label: "1h" },
@@ -149,7 +150,7 @@ Panel {
     root.profile = data.profile || null
     root.bunkerUrl = data.bunkerUrl || ""
     if (typeof data.notificationsEnabled === "boolean") root.notificationsEnabled = data.notificationsEnabled
-    if (Number(data.autoLockMinutes) > 0) {
+    if (Number.isFinite(data.autoLockMinutes)) {
       root.autoLockMinutes = Number(data.autoLockMinutes)
       if (!root.autoLockUserPicked) root.selectedAutoLockMinutes = String(root.autoLockMinutes)
     }
@@ -206,7 +207,8 @@ Panel {
     // internally to start the very first auto-lock countdown, so the
     // duration needs to be saved to config *before* that happens or the
     // first countdown after this unlock would run on the old value.
-    var minutes = Number(root.selectedAutoLockMinutes) || 15
+    var minutes = Number(root.selectedAutoLockMinutes)
+    if (!Number.isFinite(minutes) || minutes < 0) minutes = 15
     runAction("set_autolock", { minutes: minutes }, function(setRes) {
       if (!setRes.ok) {
         root.errorText = setRes.error
@@ -228,7 +230,8 @@ Panel {
     // locked there's nothing running to reset yet; submitUnlock() sends
     // this exact value at unlock time instead.
     if (!root.locked) {
-      var minutes = Number(minutesStr) || 15
+      var minutes = Number(minutesStr)
+    if (!Number.isFinite(minutes) || minutes < 0) minutes = 15
       runAction("set_autolock", { minutes: minutes }, function(res) {
         if (res.ok) {
           root.autoLockMinutes = minutes
@@ -1167,7 +1170,7 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 width: parent.width
-                text: "Currently locks after " + root.autoLockLabel(root.autoLockMinutes) + " idle."
+                text: root.autoLockMinutes === 0 ? "Auto-lock is disabled (never)." : "Currently locks after " + root.autoLockLabel(root.autoLockMinutes) + " idle."
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
