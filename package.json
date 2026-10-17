@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "node daemon/daemon.mjs",
-    "mcp": "node bin/mcp.mjs"
+    "mcp": "node bin/mcp.mjs",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "@nostr-dev-kit/ndk": "^3.0.3",

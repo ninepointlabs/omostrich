@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "About.js" as About
 
 // One Nostr bar chip: composes and posts a kind-1 note, unlocks/locks the
 // local signer, and reviews pending NIP-46 approvals / authorized apps /
@@ -135,6 +136,30 @@ Panel {
   }
 
   readonly property string settingsSummary: "Settings"
+
+  // The About page replaces the controls inside the same dropdown. Its facts
+  // (version from manifest.json, LICENSE) are read from this plugin's own
+  // folder the first time it is shown; it never calls the daemon.
+  property bool showAbout: false
+  property bool aboutLoaded: false
+  property string aboutManifest: ""
+  property string aboutLicense: ""
+  readonly property string quickshellVersion: About.probedVersion(function(a, b) { return Quickshell.hasVersion(a, b) }, 0)
+  readonly property string qtVersion: About.probedVersion(function(a, b) { return Quickshell.hasQtVersion(a, b) }, 6)
+
+  function pluginFile(name) {
+    var url = String(Qt.resolvedUrl(name))
+    return url.indexOf("file://") === 0 ? decodeURIComponent(url.substring(7)) : url
+  }
+
+  function setAbout(on) {
+    root.showAbout = !!on
+    panelFlick.contentY = 0
+    if (on) {
+      root.aboutLoaded = true
+      escCatcher.forceActiveFocus()
+    }
+  }
 
   function applyStatus(data) {
     root.daemonReachable = true
@@ -398,6 +423,7 @@ Panel {
       root.autoLockUserPicked = false
       root.refreshStatus()
     } else {
+      root.showAbout = false
       root.settingsExpanded = false
       root.nip46ManualExpand = false
       root.autoLockUserPicked = false
@@ -405,6 +431,18 @@ Panel {
   }
 
   Component.onCompleted: { root.refreshStatus(); watchProcess.running = true }
+
+  FileView {
+    path: root.aboutLoaded ? root.pluginFile("manifest.json") : ""
+    printErrors: false
+    onLoaded: root.aboutManifest = text()
+  }
+
+  FileView {
+    path: root.aboutLoaded ? root.pluginFile("LICENSE") : ""
+    printErrors: false
+    onLoaded: root.aboutLicense = text()
+  }
 
   Process {
     id: actionProcess
@@ -534,32 +572,49 @@ Panel {
     // Land keyboard focus in the composer when there's something to type
     // into; fall back to the unlock/setup field, then the esc-catcher when
     // neither applies (e.g. daemon unreachable).
-    focusTarget: (!root.locked && root.vaultExists && root.daemonReachable) ? draftField
+    focusTarget: root.showAbout ? escCatcher
+      : (!root.locked && root.vaultExists && root.daemonReachable) ? draftField
       : (root.vaultExists && root.daemonReachable) ? unlockField
       : escCatcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(620))
+    contentHeight: panel.fittedContentHeight(root.showAbout ? aboutView.implicitHeight : column.implicitHeight, Style.space(620))
 
     Item {
       id: escCatcher
       anchors.fill: parent
       focus: true
-      Keys.onEscapePressed: root.close()
+      // Esc steps back out of About before it closes the dropdown.
+      Keys.onEscapePressed: root.showAbout ? root.setAbout(false) : root.close()
 
       Flickable {
         id: panelFlick
         anchors.fill: parent
         contentWidth: width
-        contentHeight: column.implicitHeight
+        contentHeight: root.showAbout ? aboutView.implicitHeight : column.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+        AboutView {
+          id: aboutView
+          width: panelFlick.width
+          visible: root.showAbout
+          foreground: root.foreground
+          accent: Color.accent
+          fontFamily: root.fontFamily
+          version: About.manifestVersion(root.aboutManifest)
+          licenseText: root.aboutLicense
+          quickshellVersion: root.quickshellVersion
+          qtVersion: root.qtVersion
+          onBackRequested: root.setAbout(false)
+        }
+
         Column {
           id: column
           width: panelFlick.width
+          visible: !root.showAbout
           spacing: Style.space(12)
 
           PanelHero {
@@ -572,7 +627,7 @@ Panel {
               : "Unlocked"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            trailingControl: root.vaultExists && !root.locked ? lockNowButton : null
+            trailingControl: heroTrailing
             iconComponent: root.profilePicture !== "" ? avatarComp : null
           }
 
@@ -594,12 +649,26 @@ Panel {
           }
 
           Component {
-            id: lockNowButton
-            Button {
-              text: "Lock now"
-              foreground: root.foreground
-              bordered: true
-              onClicked: root.lockNow()
+            id: heroTrailing
+            Row {
+              spacing: Style.space(6)
+              Button {
+                visible: root.vaultExists && !root.locked
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Lock now"
+                foreground: root.foreground
+                bordered: true
+                onClicked: root.lockNow()
+              }
+              PanelActionButton {
+                objectName: "aboutButton"
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰋽"
+                tooltipText: "About Omostrich"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: root.setAbout(true)
+              }
             }
           }
 

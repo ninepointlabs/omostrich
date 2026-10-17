@@ -77,6 +77,14 @@ after two minutes; a signer should never sit there waiting on you
 indefinitely. Authorized apps and what they've been granted are listed
 and revocable.
 
+**About.** The 󰋽 button at the top right of the dropdown shows the
+About page: version, license (readable in place), Nine Point Labs, the
+support address, [help@ninepointlabs.com](mailto:help@ninepointlabs.com),
+with *Email*, *Copy* and *Copy version details* buttons, and exactly
+what Omostrich does with your key and your data. *Back* or `Esc`
+returns; closing the dropdown resets it. It reads only the plugin's own
+files, so it works locked or with the daemon stopped.
+
 ### Super+N: compose without opening the bar
 
 Hit `SUPER + N` from anywhere and a small compose-only overlay appears,
@@ -193,8 +201,8 @@ npm ci                # installs exactly what's pinned in package-lock.json
 `bin/ctl.mjs` to `~/.local/bin/omostrich-ctl` (make sure `~/.local/bin`
 is on your `PATH`).
 
-`install-plugin.sh` copies **every** `*.qml` file, `*.png`, and
-`manifest.json` from the repo root into
+`install-plugin.sh` copies **every** `*.qml` file, `*.js`, `*.png`,
+`manifest.json`, and `LICENSE` from the repo root into
 `~/.config/omarchy/plugins/omostrich/` — including `LockIcon.qml`,
 which is easy to forget if you ever copy plugin files by hand instead
 of running the script. `Panel.qml`'s bar-icon `iconComponent`
@@ -247,7 +255,7 @@ rm ~/.config/systemd/user/omostrich.service ~/.local/bin/omostrich-ctl
 | What | Where |
 |---|---|
 | Repo | `~/Projects/omostrich` |
-| Plugin manifest + QML | repo root (`manifest.json`, `Panel.qml`, `ComposeOverlay.qml`, `LockIcon.qml`, `ostrich.png`) |
+| Plugin manifest + QML | repo root (`manifest.json`, `Panel.qml`, `ComposeOverlay.qml`, `LockIcon.qml`, `AboutView.qml`, `About.js`, `ostrich.png`) |
 | Daemon source | `daemon/` |
 | Encrypted vault + config + profile cache | `~/.local/share/omostrich/` |
 | Control socket, daemon log, notification dedup state | `~/.local/state/omarchy/omostrich/` |
@@ -441,6 +449,18 @@ pattern as `TailscaleIcon.qml`'s warning indicator
 `BorderSurface` circle anchored to a corner, deliberately not a novel
 pattern. `omarchy plugin validate <folder>` (ships with Omarchy) checks
 the manifest against the current schema if something breaks later.
+
+## Tests
+
+```bash
+npm ci
+npm test    # node --test tests/
+```
+
+Checks the About page's facts against the real `manifest.json`,
+`LICENSE` and first commit, and that its privacy statement names every
+relay and host in the code (and NDK's own default relays). They read
+source files only; no vault, daemon, socket or relay is touched.
 
 ## License
 
