@@ -28,9 +28,10 @@ OLD_SIGNER_TARGET="$HOME/.config/omarchy/plugins/nostr-signer"
 # where the icon should be. This happened for real on this machine
 # right after an earlier repo rename, from exactly that kind of hand-copy.
 mkdir -p "$TARGET"
-cp "$DIR"/*.qml "$DIR"/*.png "$DIR"/manifest.json "$TARGET/"
+# About.js and LICENSE are read by the About page (AboutView.qml).
+cp "$DIR"/*.qml "$DIR"/*.js "$DIR"/*.png "$DIR"/manifest.json "$DIR"/LICENSE "$TARGET/"
 
-echo "Copied $DIR/*.{qml,png,json} -> $TARGET/"
+echo "Copied $DIR/*.{qml,js,png,json} and LICENSE -> $TARGET/"
 
 omarchy plugin validate "$DIR"
 
