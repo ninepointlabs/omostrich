@@ -11,3 +11,4 @@ export const configPath = path.join(dataDir, "config.json");
 export const profileCachePath = path.join(dataDir, "profile-cache.json");
 export const socketPath = path.join(stateDir, "control.sock");
 export const logPath = path.join(stateDir, "daemon.log");
+export const tcpTokenPath = path.join(stateDir, "tcp-token");

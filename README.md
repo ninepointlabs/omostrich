@@ -111,6 +111,19 @@ unlocked. It:
   running as this user can already reach it," same as any local IPC
   socket. `bin/ctl.mjs` (installed as `omostrich-ctl`) is a thin CLI
   wrapper over it: one JSON command in, one JSON response out.
+- When Tailscale is up (a `tailscale0` interface with an IPv4 address at
+  daemon start), also listens on **TCP port 4737 on that Tailscale
+  address**, with the same protocol and commands, for remote clients
+  such as a phone. The first line a TCP client sends must be
+  `{"auth": "<token>"}`, with the token from
+  `~/.local/state/omarchy/omostrich/tcp-token` (created on first start,
+  mode 0600). Until it authenticates nothing is run; a wrong token, a
+  command, or more than 4 KB first closes the connection, and so do 10
+  seconds of silence. After that the client can do anything the local
+  socket can, including signing and posting while unlocked and
+  replacing the vault, so treat the token like a password. Delete the
+  file and restart the daemon (`systemctl --user restart omostrich`)
+  to issue a new one.
 - Publishes a note to **every relay you've configured** by resolving
   each one explicitly and publishing to it directly — not just
   whichever subset happened to already be connected at that instant,
@@ -168,11 +181,13 @@ write it to that pipe.
 - **Locked means locked.** Every signing path checks the unlock state
   first and refuses with a plain error if it isn't unlocked — there's
   no back door, no cached signature, no "just this once."
-- **The trust boundary is your own user account.** The control socket
-  has no separate authentication beyond filesystem permissions (0600,
-  owned by you) — the assumption, standard for local Unix-socket IPC,
-  is that anything already running as you is already inside your trust
-  boundary. This is why other agents (Hermes, Claude Code, etc.) can
+- **The trust boundary is your own user account, plus your tailnet.**
+  The control socket has no separate authentication beyond filesystem
+  permissions (0600, owned by you) — the assumption, standard for local
+  Unix-socket IPC, is that anything already running as you is already
+  inside your trust boundary. The TCP listener on the Tailscale address
+  extends that boundary to devices on your tailnet that hold the token
+  in `tcp-token`; a tailnet device without it gets nothing run. This is why other agents (Hermes, Claude Code, etc.) can
   post on your explicit request by calling the same CLI you do, and
   also why the daemon logs every signature it produces — so "who signed
   what, and when" has a real answer even though the socket itself

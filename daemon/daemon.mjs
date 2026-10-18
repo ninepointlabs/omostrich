@@ -172,7 +172,14 @@ async function unlockWith(passphrase) {
   pubkeyHex = decrypted.pubkeyHex;
 
   const signer = new NDKPrivateKeySigner(skBytes);
-  ndk = new NDK({ explicitRelayUrls: config.relays });
+  // The pool must include nip46Relays, not just the posting relays.
+  // NDKNip46Backend.start() subscribes for incoming kind-24133 requests via
+  // plain ndk.subscribe() with no relaySet — i.e. on this pool only. Its
+  // `relayUrls` argument only controls where *responses* go. With just
+  // config.relays here, a request a client sent via a bunker:// relay that
+  // isn't also a posting relay (nos.lol) was never heard at all. Posting is
+  // unaffected: publishNote() resolves config.relays explicitly.
+  ndk = new NDK({ explicitRelayUrls: [...new Set([...config.relays, ...nip46RelayList()])] });
   await ndk.connect(4000).catch((err) => log(`relay connect warning: ${err?.message || err}`));
 
   // ndk.connect(4000) races a 4s timeout against every relay's handshake —
@@ -201,6 +208,13 @@ async function unlockWith(passphrase) {
   // the actual authorization decision still runs through permitCallback via
   // pubkeyAllowed() right after this, same as every other method.
   backend.applyToken = async () => {};
+  // Log every incoming NIP-46 request (sender + relay, never content) so
+  // "the bunker isn't responding" can be told apart from "nothing arrived."
+  const handleIncoming = backend.handleIncomingEvent.bind(backend);
+  backend.handleIncomingEvent = (event) => {
+    log(`nip46 request from ${event.pubkey?.slice(0, 16)} via ${event.relay?.url ?? "unknown relay"}`);
+    return handleIncoming(event);
+  };
   await backend.start();
 
   touchActivity();
@@ -616,5 +630,5 @@ const server = createControlServer(handleCommand);
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
 
-await server.listen();
-log(`daemon listening, vault ${vault.exists() ? "present" : "absent"}`);
+const addrs = await server.listen();
+log(`daemon listening on ${addrs.join(", ")}, vault ${vault.exists() ? "present" : "absent"}`);
