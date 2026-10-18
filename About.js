@@ -17,7 +17,7 @@ var SUPPORT_EMAIL = "help@ninepointlabs.com"
 // is created only on unlock; publish, kind-0 profile lookup, NIP-46 backend,
 // audit log), daemon/notify-watch.mjs (mention/DM/zap subscription),
 // daemon/blossom.mjs (the only fetch()), daemon/control-socket.mjs (0600
-// socket), Panel.qml (profile picture Image), and NDK's default outbox
+// socket, plus token-gated TCP 4737 on the Tailscale address), Panel.qml (profile picture Image), and NDK's default outbox
 // relays (purplepag.es, nos.lol). tests/about.test.mjs fails if a host is
 // added to the code without being named here.
 var PRIVACY = [
@@ -36,9 +36,16 @@ var PRIVACY = [
     + "Blossom server you configure. The panel loads your profile picture from the address in your "
     + "Nostr profile.",
   "Other programs running as you can use the signer through ~/.local/state/omarchy/omostrich/control.sock "
-    + "(mode 0600). The daemon logs unlocks, each signature and each post (event kind and id, a short "
-    + "content hash, length, relay results) to daemon.log in that folder; never your key or passphrase. "
-    + "Settings and your cached profile are in ~/.local/share/omostrich/."
+    + "(mode 0600). When Tailscale is up, the daemon also listens on TCP port 4737 on this computer's "
+    + "Tailscale address, for your own devices such as a phone. A device must first send the token kept "
+    + "in ~/.local/state/omarchy/omostrich/tcp-token (mode 0600); until it does, nothing is run, and a "
+    + "wrong token closes the connection. A device with the token can do everything the socket allows: "
+    + "lock it, unlock it with your passphrase, sign, post, approve apps and change relays while it is "
+    + "unlocked, and replace the stored key. Delete tcp-token and restart the daemon to issue a new one.",
+  "The daemon logs unlocks, each signature and each post (event kind and id, a short content hash, "
+    + "length, relay results), and the sender (first 16 characters of the public key) and relay of each "
+    + "incoming NIP-46 request, to daemon.log in ~/.local/state/omarchy/omostrich/; never your key, your "
+    + "passphrase or a request's content. Settings and your cached profile are in ~/.local/share/omostrich/."
 ].join("\n\n")
 
 // "0.2.0" from manifest.json's text, or "" when it can't be read.

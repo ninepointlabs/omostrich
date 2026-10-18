@@ -138,7 +138,25 @@ test("privacy statement matches the vault, socket and log code", () => {
   assert.match(paths, /socketPath = path\.join\(stateDir, "control\.sock"\)/);
   assert.ok(About.PRIVACY.includes("~/.local/share/omostrich/vault.json"));
   assert.ok(About.PRIVACY.includes("~/.local/state/omarchy/omostrich/control.sock"));
-  assert.match(read("daemon/control-socket.mjs"), /chmodSync\(socketPath, 0o600\)/);
+  const control = read("daemon/control-socket.mjs");
+  assert.match(control, /chmodSync\(socketPath, 0o600\)/);
+  // The tailnet listener: port, interface and the fact that it has no auth
+  // must all be in the privacy text, or a reader would think the socket is the only way in.
+  const port = control.match(/const TCP_PORT = (\d+);/);
+  assert.ok(port, "TCP_PORT not found in control-socket.mjs");
+  assert.match(control, /ifaces\["tailscale0"\]/);
+  assert.ok(About.PRIVACY.includes("TCP port " + port[1]), "privacy text must name TCP port " + port[1]);
+  assert.match(About.PRIVACY, /Tailscale address/);
+  // TCP is token-gated: the TCP server requires auth, the token lives in tcp-token.
+  assert.match(control, /net\.createServer\(\(socket\) => createConnection\(socket, true\)\)/);
+  assert.match(read("daemon/paths.mjs"), /tcpTokenPath = path\.join\(stateDir, "tcp-token"\)/);
+  assert.ok(About.PRIVACY.includes("~/.local/state/omarchy/omostrich/tcp-token"));
+  assert.match(About.PRIVACY, /must first send the token/);
+  assert.match(About.PRIVACY, /replace the stored key/);
+  // The NIP-46 request log records sender and relay, never content.
+  const daemonSrc = read("daemon/daemon.mjs");
+  assert.match(daemonSrc, /log\(`nip46 request from \$\{event\.pubkey\?\.slice\(0, 16\)\} via/);
+  assert.match(About.PRIVACY, /first 16 characters of the public key/);
   // Relays are opened only by unlockWith(): no NDK outside it.
   const daemon = read("daemon/daemon.mjs");
   assert.equal(daemon.match(/new NDK\(/g).length, 1);
