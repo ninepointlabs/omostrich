@@ -77,6 +77,21 @@ after two minutes; a signer should never sit there waiting on you
 indefinitely. Authorized apps and what they've been granted are listed
 and revocable.
 
+**Connect an app by QR code (nostrconnect://).** Some apps start the
+connection themselves: Amethyst's "login with a remote signer" shows a
+`nostrconnect://` QR code instead of asking for a `bunker://` string.
+Under Remote signing, **Scan QR** opens your laptop camera (via
+`zbarcam`, in its own preview window) and closes it as soon as it reads
+a QR code, on **Cancel scan**, or after two minutes. **Paste code** does
+the same with a `nostrconnect://` string you copied. The daemon checks
+the code (hex pubkey, `ws://`/`wss://` relays only, at most 8, a secret
+required) and answers the app on the relays it named, which completes
+its login. Scanning is your approval of that connection only: the app's
+requests after it (`sign_event` and the rest) show up for approval like
+any other. The app is added to Authorized apps under the name it gave,
+with its relays, so the daemon keeps listening on them after every
+unlock; **Revoke** removes it. The vault must be unlocked to connect.
+
 **About.** The 󰋽 button at the top right of the dropdown shows the
 About page: version, license (readable in place), Nine Point Labs, the
 support address, [help@ninepointlabs.com](mailto:help@ninepointlabs.com),
@@ -199,7 +214,8 @@ write it to that pipe.
 
 ## Install
 
-Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
+Requires `zbar` (`zbarcam`) for Scan QR — `sudo pacman -S zbar` if it
+isn't installed; everything else works without it. Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
 `volta`, whatever puts `node` on your `PATH`) and
 [Omarchy](https://omarchy.org).
 
@@ -271,7 +287,7 @@ rm ~/.config/systemd/user/omostrich.service ~/.local/bin/omostrich-ctl
 |---|---|
 | Repo | `~/Projects/omostrich` |
 | Plugin manifest + QML | repo root (`manifest.json`, `Panel.qml`, `ComposeOverlay.qml`, `LockIcon.qml`, `AboutView.qml`, `About.js`, `ostrich.png`) |
-| Daemon source | `daemon/` |
+| Daemon source | `daemon/` (`nostrconnect.mjs` parses scanned QR codes) |
 | Encrypted vault + config + profile cache | `~/.local/share/omostrich/` |
 | Control socket, daemon log, notification dedup state | `~/.local/state/omarchy/omostrich/` |
 | CLI | `omostrich-ctl` (symlinked from `bin/ctl.mjs`) |

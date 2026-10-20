@@ -16,7 +16,7 @@ var SUPPORT_EMAIL = "help@ninepointlabs.com"
 // scrypt, 0600), daemon/config.mjs (default relays), daemon/daemon.mjs (NDK
 // is created only on unlock; publish, kind-0 profile lookup, NIP-46 backend,
 // audit log), daemon/notify-watch.mjs (mention/DM/zap subscription),
-// daemon/blossom.mjs (the only fetch()), daemon/control-socket.mjs (0600
+// daemon/nostrconnect.mjs (relays named by a scanned code), daemon/blossom.mjs (the only fetch()), daemon/control-socket.mjs (0600
 // socket, plus token-gated TCP 4737 on the Tailscale address), Panel.qml (profile picture Image), and NDK's default outbox
 // relays (purplepag.es, nos.lol). tests/about.test.mjs fails if a host is
 // added to the code without being named here.
@@ -32,6 +32,10 @@ var PRIVACY = [
     + "default relay.damus.io, relay.primal.net and nos.lol) to answer signing requests from apps you "
     + "approve. Its Nostr library also connects to purplepag.es and nos.lol to look up relay lists, and "
     + "may read your profile from the relays in your published relay list.",
+  "If you connect an app from its nostrconnect:// code (Remote signing, Scan QR or Paste code), the "
+    + "daemon also uses the relays that code names to answer that app, after every unlock, until you "
+    + "revoke it. Scan QR turns on your camera through zbarcam, in its own window, only until it reads "
+    + "one QR code, you cancel, or two minutes pass; no picture is saved or sent anywhere.",
   "Notes you publish are public and permanent on those relays. Images you attach are uploaded to the "
     + "Blossom server you configure. The panel loads your profile picture from the address in your "
     + "Nostr profile.",

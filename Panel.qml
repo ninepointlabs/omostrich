@@ -72,6 +72,8 @@ Panel {
   property string attachPath: ""
   property var attachedBlob: null
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/omostrich/clipboard.png"
+  // True while zbarcam has the camera open for a nostrconnect:// QR code.
+  property bool scanning: false
   property bool settingsExpanded: false
   property bool autoLockUserPicked: false
   // What the picker currently shows. Seeded from the daemon's last-known
@@ -346,6 +348,40 @@ Panel {
     runAction("revoke_client", { pubkey: pubkey }, function(res) { root.refreshStatus() })
   }
 
+  // Client-initiated NIP-46 (Amethyst's "login with remote signer" QR).
+  // The panel only reads the code; the daemon parses it and answers the app.
+  function connectApp(uri) {
+    var code = String(uri || "").trim()
+    if (code.indexOf("nostrconnect://") !== 0) {
+      root.reportConnect(false, code ? "That isn't a nostrconnect:// code." : "No code found.")
+      return
+    }
+    runAction("nostrconnect", { uri: code }, function(res) {
+      if (res.ok) root.reportConnect(true, "Connected " + (res.data.name || "app") + ". Approve its requests below.")
+      else root.reportConnect(false, "Connect failed: " + res.error)
+    })
+  }
+
+  // The camera window or a closed dropdown can hide the panel's own status
+  // line, so the result also goes out as a desktop notification then.
+  function reportConnect(ok, text) {
+    if (ok) root.statusText = text
+    else root.errorText = text
+    if (!root.opened) Quickshell.execDetached(["notify-send", "-a", "Omostrich", "Omostrich", text])
+  }
+
+  function scanConnectQr() {
+    if (root.scanning) { scanProcess.running = false; return }
+    root.errorText = ""
+    root.statusText = "Hold the app's QR code up to the camera…"
+    scanProcess.running = true
+  }
+
+  function pasteConnectCode() {
+    pasteCodeProcess.running = false
+    pasteCodeProcess.running = true
+  }
+
   function copyBunkerUrl() {
     if (!root.bunkerUrl) return
     Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(root.bunkerUrl) + " | wl-copy"])
@@ -481,6 +517,49 @@ Panel {
     onExited: function(exitCode) {
       if (exitCode === 0) root.uploadFromPath(root.pastePath)
       else root.errorText = "No image on the clipboard (wl-paste found nothing)."
+    }
+  }
+
+  // zbarcam opens the camera in its own preview window and, with --oneshot,
+  // exits after the first QR code it decodes (only QR is enabled). Closing
+  // that window, the Cancel button, or the 2-minute timer stops it.
+  Process {
+    id: scanProcess
+    running: false
+    command: ["zbarcam", "--oneshot", "--raw", "--quiet", "-Sdisable", "-Sqrcode.enable"]
+    stdout: StdioCollector {
+      id: scanStdout
+      waitForEnd: true
+    }
+    onRunningChanged: {
+      root.scanning = running
+      if (running) scanTimeout.restart()
+      else scanTimeout.stop()
+    }
+    onExited: function(exitCode) {
+      var code = String(scanStdout.text || "").trim()
+      if (exitCode === 0 && code) root.connectApp(code)
+      else root.statusText = ""
+    }
+  }
+
+  Timer {
+    id: scanTimeout
+    interval: 120000
+    repeat: false
+    onTriggered: scanProcess.running = false
+  }
+
+  Process {
+    id: pasteCodeProcess
+    running: false
+    command: ["wl-paste", "--no-newline", "--type", "text"]
+    stdout: StdioCollector {
+      id: pasteCodeStdout
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      root.connectApp(exitCode === 0 ? pasteCodeStdout.text : "")
     }
   }
 
@@ -1024,6 +1103,33 @@ Panel {
                   foreground: root.foreground
                   bordered: true
                   onClicked: root.copyBunkerUrl()
+                }
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Or let the app connect first: when it shows a nostrconnect:// QR code (Amethyst: login with a remote signer), scan it with the camera, or copy the code and paste it."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Row {
+                spacing: Style.space(6)
+                Button {
+                  text: root.scanning ? "Cancel scan" : "Scan QR"
+                  foreground: root.foreground
+                  bordered: true
+                  onClicked: root.scanConnectQr()
+                }
+                Button {
+                  text: "Paste code"
+                  foreground: root.foreground
+                  bordered: true
+                  enabled: !root.busy && !root.scanning
+                  onClicked: root.pasteConnectCode()
                 }
               }
 
