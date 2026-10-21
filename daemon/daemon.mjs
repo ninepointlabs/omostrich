@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import WS from "ws";
-import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner, NDKRelaySet } from "@nostr-dev-kit/ndk";
 import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
 import * as blossom from "./blossom.mjs";
 import { createNotifyWatch } from "./notify-watch.mjs";
+import { parseNostrConnectUri } from "./nostrconnect.mjs";
 import { createControlServer } from "./control-socket.mjs";
 import { stateDir, logPath, dataDir, profileCachePath } from "./paths.mjs";
 import path from "node:path";
@@ -162,6 +163,15 @@ function nip46RelayList() {
   return Array.isArray(config.nip46Relays) && config.nip46Relays.length > 0 ? config.nip46Relays : config.relays;
 }
 
+// Relays the NIP-46 backend listens and answers on: nip46Relays plus every
+// relay a nostrconnect:// app asked for when it was connected. Those apps
+// (Amethyst) keep talking to us on their own relays, not ours, so they have
+// to be in the set from every unlock on, not just the one they connected in.
+function nip46ListenRelays() {
+  const fromClients = Object.values(config.clients).flatMap((c) => (Array.isArray(c?.relays) ? c.relays : []));
+  return [...new Set([...nip46RelayList(), ...fromClients])];
+}
+
 async function unlockWith(passphrase) {
   if (skBytes) throw new Error("already unlocked");
   if (!vault.exists()) throw new Error("no vault; import a key first");
@@ -179,7 +189,7 @@ async function unlockWith(passphrase) {
   // config.relays here, a request a client sent via a bunker:// relay that
   // isn't also a posting relay (nos.lol) was never heard at all. Posting is
   // unaffected: publishNote() resolves config.relays explicitly.
-  ndk = new NDK({ explicitRelayUrls: [...new Set([...config.relays, ...nip46RelayList()])] });
+  ndk = new NDK({ explicitRelayUrls: [...new Set([...config.relays, ...nip46ListenRelays()])] });
   await ndk.connect(4000).catch((err) => log(`relay connect warning: ${err?.message || err}`));
 
   // ndk.connect(4000) races a 4s timeout against every relay's handshake —
@@ -193,7 +203,7 @@ async function unlockWith(passphrase) {
     .join(", ");
   log(`post-connect relay states (4s window): ${relayStates}`);
 
-  backend = new NDKNip46Backend(ndk, signer, permitCallback, nip46RelayList());
+  backend = new NDKNip46Backend(ndk, signer, permitCallback, nip46ListenRelays());
   // NDKNip46Backend's default applyToken() throws "connection token not
   // supported" whenever a connect request carries a secret/token param —
   // and the NIP-46 spec's own bunker:// example includes an optional
@@ -208,12 +218,39 @@ async function unlockWith(passphrase) {
   // the actual authorization decision still runs through permitCallback via
   // pubkeyAllowed() right after this, same as every other method.
   backend.applyToken = async () => {};
-  // Log every incoming NIP-46 request (sender + relay, never content) so
-  // "the bunker isn't responding" can be told apart from "nothing arrived."
+  // Log every incoming NIP-46 request (sender, relay and method, never
+  // params) and every reply (ok, or the error string, never the result), so
+  // "the bunker isn't responding" can be told apart from "nothing arrived"
+  // and from "it answered with an error."
+  // Also drops an event already handled: a relay added by nostrConnect()
+  // gets its own subscription on top of backend.start()'s, so one request
+  // can arrive twice, and handling it twice would queue two approvals.
   const handleIncoming = backend.handleIncomingEvent.bind(backend);
+  const seenRequests = new Set();
   backend.handleIncomingEvent = (event) => {
-    log(`nip46 request from ${event.pubkey?.slice(0, 16)} via ${event.relay?.url ?? "unknown relay"}`);
-    return handleIncoming(event);
+    if (seenRequests.has(event.id)) return;
+    seenRequests.add(event.id);
+    if (seenRequests.size > 500) seenRequests.delete(seenRequests.values().next().value);
+    const from = event.pubkey?.slice(0, 16);
+    const via = event.relay?.url ?? "unknown relay";
+    return backend.rpc.parseEvent(event).then(
+      ({ method }) => {
+        log(`nip46 request ${method || "(no method)"} from ${from} via ${via}`);
+        return handleIncoming(event);
+      },
+      (err) => log(`nip46 request from ${from} via ${via}: could not decrypt/parse (${err?.message || err})`),
+    );
+  };
+  const sendResponse = backend.rpc.sendResponse.bind(backend.rpc);
+  backend.rpc.sendResponse = async (id, remotePubkey, result, kind, error) => {
+    const outcome = result === "error" ? `error: ${error}` : "ok";
+    try {
+      await sendResponse(id, remotePubkey, result, kind, error);
+      log(`nip46 reply to ${remotePubkey?.slice(0, 16)}: ${outcome}`);
+    } catch (err) {
+      log(`nip46 reply to ${remotePubkey?.slice(0, 16)} (${outcome}) failed to publish: ${err?.message || err}`);
+      throw err;
+    }
   };
   await backend.start();
 
@@ -339,8 +376,11 @@ function resolvePending(id, approved, { remember, label } = {}) {
     const existing = config.clients[entry.pubkey];
     const methods = Array.isArray(existing?.methods) ? existing.methods.slice() : [];
     if (!methods.includes(entry.method)) methods.push(entry.method);
+    // Spread keeps a nostrconnect app's relays; its scanned name wins over
+    // the panel's generic "Approved app" label.
     config.clients[entry.pubkey] = {
-      label: label || existing?.label || "Unnamed app",
+      ...existing,
+      label: existing?.label || label || "Unnamed app",
       addedAt: existing?.addedAt || new Date().toISOString(),
       methods,
     };
@@ -403,6 +443,85 @@ function bunkerUrl() {
   if (!Array.isArray(relayList) || relayList.length === 0) return "";
   const relayParams = relayList.map((r) => `relay=${encodeURIComponent(r)}`).join("&");
   return `bunker://${pubkeyHex}?${relayParams}`;
+}
+
+// Signer side of a client-initiated NIP-46 connection: the app (Amethyst's
+// "login with remote signer") shows a nostrconnect:// QR code, the panel
+// scans it with the camera, and we answer the app's implied `connect` by
+// sending its secret back to its pubkey on its relays. Scanning the code is
+// the user's approval of that connect; every request the app makes after it
+// (get_public_key, sign_event, ...) still goes through permitCallback like
+// any other NIP-46 request.
+async function nostrConnect(uri) {
+  if (!skBytes || !ndk || !backend) throw new Error("locked");
+  const conn = parseNostrConnectUri(uri);
+
+  // Listen and answer on the app's relays from now on. backend.start()'s
+  // subscription only covers relays that were in the pool at unlock, so
+  // relays new to this session get a subscription of their own.
+  const listening = new Set(backend.relayUrls);
+  const fresh = conn.relays.filter((url) => !listening.has(url));
+  for (const url of fresh) {
+    ndk.pool.getRelay(url, true, false);
+    backend.rpc.relaySet.addRelay(backend.rpc.pool.getRelay(url, true, false));
+    backend.relayUrls.push(url);
+  }
+  if (fresh.length > 0) {
+    ndk.subscribe(
+      { kinds: [24133], "#p": [pubkeyHex], since: Math.floor(Date.now() / 1000) - 10 },
+      {
+        closeOnEose: false,
+        groupable: false,
+        relaySet: NDKRelaySet.fromRelayUrls(fresh, ndk),
+        onEvent: (e) => backend.handleIncomingEvent(e),
+      },
+    );
+  }
+
+  const signer = new NDKPrivateKeySigner(skBytes);
+  const response = new NDKEvent(ndk, {
+    kind: 24133,
+    content: JSON.stringify({ id: crypto.randomBytes(8).toString("hex"), result: conn.secret }),
+    tags: [["p", conn.clientPubkey]],
+    pubkey: pubkeyHex,
+    created_at: Math.floor(Date.now() / 1000),
+  });
+  response.content = await signer.encrypt(ndk.getUser({ pubkey: conn.clientPubkey }), response.content, "nip44");
+  await response.sign(signer);
+
+  const outcomes = await Promise.allSettled(
+    conn.relays.map(async (url) => {
+      await ndk.pool.getRelay(url, true, false).publish(response, 8000);
+      return url;
+    }),
+  );
+  const publishedTo = conn.relays.filter((_, i) => outcomes[i].status === "fulfilled");
+  const failed = conn.relays
+    .map((url, i) => ({ url, outcome: outcomes[i] }))
+    .filter((r) => r.outcome.status === "rejected")
+    .map((r) => ({ url: r.url, error: String(r.outcome.reason?.message || r.outcome.reason) }));
+
+  log(
+    `nostrconnect to ${conn.clientPubkey.slice(0, 16)} (${conn.name || "unnamed"}): `
+      + conn.relays.map((url) => `${url}=${publishedTo.includes(url) ? "ok" : "FAILED"}`).join(", "),
+  );
+  if (publishedTo.length === 0) throw new Error("could not reach any of the app's relays");
+
+  // Remembered so its relays are listened on after the next unlock too, and
+  // so it shows under Authorized apps with a Revoke button. No methods are
+  // granted here: the app's first request of each kind still asks.
+  const existing = config.clients[conn.clientPubkey];
+  config.clients[conn.clientPubkey] = {
+    label: conn.name || existing?.label || "Nostr Connect app",
+    addedAt: existing?.addedAt || new Date().toISOString(),
+    methods: Array.isArray(existing?.methods) ? existing.methods : [],
+    relays: conn.relays,
+  };
+  configStore.save(config);
+
+  touchActivity();
+  broadcastStatus();
+  return { clientPubkey: conn.clientPubkey, name: config.clients[conn.clientPubkey].label, publishedTo, failed };
 }
 
 async function signInternal(eventTemplate) {
@@ -585,6 +704,26 @@ async function handleCommand(cmd, req) {
     case "deny":
       resolvePending(req.id, false);
       return { id: req.id, approved: false };
+
+    // Approve all / Deny all in the panel. Takes the ids the panel was
+    // showing, not "everything pending", so a request that arrives between
+    // the click and this command still waits for its own decision. Always
+    // once: no grant is remembered. Ids already gone (timed out) are skipped.
+    case "resolve_many": {
+      if (!Array.isArray(req.ids)) throw new Error("ids must be an array");
+      if (typeof req.approved !== "boolean") throw new Error("approved must be a boolean");
+      let resolved = 0;
+      for (const id of req.ids) {
+        if (!pending.has(id)) continue;
+        resolvePending(id, req.approved);
+        resolved++;
+      }
+      log(`${req.approved ? "approved" : "denied"} ${resolved} pending NIP-46 request(s) at once`);
+      return { resolved, approved: req.approved };
+    }
+
+    case "nostrconnect":
+      return nostrConnect(req.uri);
 
     case "sign_internal":
       return signInternal(req.event);

@@ -120,6 +120,7 @@ test("only the Blossom upload makes HTTP requests, and the panel loads only the 
     "\"ostrich.png\"", // bar icon, local
     "(root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : \"\"", // Blossom upload preview
     "root.profilePicture", // profile picture
+    "root.showBunkerQr ? root.bunkerQrSource : \"\"", // bunker QR, local file from qrencode
     "silhouette", // bar icon tint (LockIcon.qml), local
   ]);
   assert.match(About.PRIVACY, /profile picture/);
@@ -153,10 +154,14 @@ test("privacy statement matches the vault, socket and log code", () => {
   assert.ok(About.PRIVACY.includes("~/.local/state/omarchy/omostrich/tcp-token"));
   assert.match(About.PRIVACY, /must first send the token/);
   assert.match(About.PRIVACY, /replace the stored key/);
-  // The NIP-46 request log records sender and relay, never content.
+  // The NIP-46 request log records sender, relay and method, never params;
+  // replies log ok or the error string, never the result.
   const daemonSrc = read("daemon/daemon.mjs");
-  assert.match(daemonSrc, /log\(`nip46 request from \$\{event\.pubkey\?\.slice\(0, 16\)\} via/);
+  assert.match(daemonSrc, /const from = event\.pubkey\?\.slice\(0, 16\);/);
+  assert.match(daemonSrc, /log\(`nip46 request \$\{method \|\| "\(no method\)"\} from \$\{from\} via \$\{via\}`\)/);
+  assert.match(daemonSrc, /const outcome = result === "error" \? `error: \$\{error\}` : "ok";/);
   assert.match(About.PRIVACY, /first 16 characters of the public key/);
+  assert.match(About.PRIVACY, /never your key, your passphrase, a request's content or what was sent back/);
   // Relays are opened only by unlockWith(): no NDK outside it.
   const daemon = read("daemon/daemon.mjs");
   assert.equal(daemon.match(/new NDK\(/g).length, 1);

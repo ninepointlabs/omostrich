@@ -46,6 +46,7 @@ Panel {
   // way rather than an absolute interpreter path, for the same reason.
   readonly property string nodeBin: "node"
   readonly property string ctlPath: Quickshell.env("HOME") + "/Projects/omostrich/bin/ctl.mjs"
+  readonly property string scanPath: Quickshell.env("HOME") + "/Projects/omostrich/bin/scan-qr.mjs"
 
   property bool locked: true
   property bool vaultExists: false
@@ -72,6 +73,15 @@ Panel {
   property string attachPath: ""
   property var attachedBlob: null
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/omostrich/clipboard.png"
+  // True while bin/scan-qr.mjs has the camera open for a nostrconnect:// QR code.
+  property bool scanning: false
+  // bunker:// URL as a QR code for a phone app (Amethyst) to scan. Written
+  // by qrencode next to the control socket; the URL is public (pubkey and
+  // relays, no secret), so the PNG is too.
+  property bool showBunkerQr: false
+  property string bunkerQrPath: Quickshell.env("HOME") + "/.local/state/omarchy/omostrich/bunker-qr.png"
+  property string bunkerQrSource: ""
+  property string bunkerQrFor: ""
   property bool settingsExpanded: false
   property bool autoLockUserPicked: false
   // What the picker currently shows. Seeded from the daemon's last-known
@@ -342,9 +352,67 @@ Panel {
     runAction("deny", { id: id }, function(res) { root.refreshStatus() })
   }
 
+  // Only the requests on screen now; see resolve_many in daemon.mjs.
+  function resolveAllPending(approved) {
+    var ids = root.pendingList.map(function(p) { return p.id })
+    if (ids.length === 0) return
+    runAction("resolve_many", { ids: ids, approved: approved }, function(res) {
+      if (res.ok) root.statusText = (approved ? "Approved " : "Denied ") + res.data.resolved + " request" + (res.data.resolved === 1 ? "." : "s.")
+      else root.errorText = res.error
+      root.refreshStatus()
+    })
+  }
+
   function revokeClient(pubkey) {
     runAction("revoke_client", { pubkey: pubkey }, function(res) { root.refreshStatus() })
   }
+
+  // Client-initiated NIP-46 (Amethyst's "login with remote signer" QR).
+  // The panel only reads the code; the daemon parses it and answers the app.
+  function connectApp(uri) {
+    var code = String(uri || "").trim()
+    if (code.indexOf("nostrconnect://") !== 0) {
+      root.reportConnect(false, code ? "That isn't a nostrconnect:// code." : "No code found.")
+      return
+    }
+    runAction("nostrconnect", { uri: code }, function(res) {
+      if (res.ok) root.reportConnect(true, "Connected " + (res.data.name || "app") + ". Approve its requests below.")
+      else root.reportConnect(false, "Connect failed: " + res.error)
+    })
+  }
+
+  // The camera window or a closed dropdown can hide the panel's own status
+  // line, so the result also goes out as a desktop notification then.
+  function reportConnect(ok, text) {
+    if (ok) root.statusText = text
+    else root.errorText = text
+    if (!root.opened) Quickshell.execDetached(["notify-send", "-a", "Omostrich", "Omostrich", text])
+  }
+
+  function scanConnectQr() {
+    if (root.scanning) { scanProcess.running = false; return }
+    root.errorText = ""
+    root.statusText = "Hold the app's QR code up to the camera…"
+    scanProcess.running = true
+  }
+
+  function pasteConnectCode() {
+    pasteCodeProcess.running = false
+    pasteCodeProcess.running = true
+  }
+
+  function toggleBunkerQr() {
+    root.showBunkerQr = !root.showBunkerQr
+    if (root.showBunkerQr) root.renderBunkerQr()
+  }
+
+  function renderBunkerQr() {
+    if (!root.bunkerUrl || root.bunkerQrFor === root.bunkerUrl) return
+    qrProcess.running = false
+    qrProcess.running = true
+  }
+
+  onBunkerUrlChanged: if (root.showBunkerQr) root.renderBunkerQr()
 
   function copyBunkerUrl() {
     if (!root.bunkerUrl) return
@@ -420,12 +488,14 @@ Panel {
       // of how it got there or what state it was left in before.
       root.settingsExpanded = false
       root.nip46ManualExpand = false
+      root.showBunkerQr = false
       root.autoLockUserPicked = false
       root.refreshStatus()
     } else {
       root.showAbout = false
       root.settingsExpanded = false
       root.nip46ManualExpand = false
+      root.showBunkerQr = false
       root.autoLockUserPicked = false
     }
   }
@@ -481,6 +551,75 @@ Panel {
     onExited: function(exitCode) {
       if (exitCode === 0) root.uploadFromPath(root.pastePath)
       else root.errorText = "No image on the clipboard (wl-paste found nothing)."
+    }
+  }
+
+  // URL goes on argv: it is public (see bunkerQrPath). "?v=" busts Image's
+  // cache when the relays, and so the code, change.
+  Process {
+    id: qrProcess
+    property string url: ""
+    running: false
+    command: ["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && qrencode -o \"$1\" -s 8 -m 2 -l M -- \"$2\"", "_", root.bunkerQrPath, url]
+    onRunningChanged: if (running) url = root.bunkerUrl
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.bunkerQrFor = url
+        root.bunkerQrSource = "file://" + root.bunkerQrPath + "?v=" + Date.now()
+      } else {
+        root.errorText = "Couldn't draw the QR code (is qrencode installed?)."
+        root.showBunkerQr = false
+      }
+    }
+  }
+
+  // bin/scan-qr.mjs opens the camera with a preview window and exits after
+  // the first nostrconnect:// QR code it reads (it upscales and sharpens
+  // frames first; see that file for why plain zbarcam missed Amethyst's
+  // dense code). Closing the preview, Cancel scan, or the 2-minute timer
+  // stops it. Exit 2 means the camera or a tool couldn't start.
+  Process {
+    id: scanProcess
+    running: false
+    command: [root.nodeBin, root.scanPath, "--prefix", "nostrconnect://", "--timeout", "120"]
+    stdout: StdioCollector {
+      id: scanStdout
+      waitForEnd: true
+    }
+    stderr: StdioCollector {
+      id: scanStderr
+      waitForEnd: true
+    }
+    onRunningChanged: {
+      root.scanning = running
+      if (running) scanTimeout.restart()
+      else scanTimeout.stop()
+    }
+    onExited: function(exitCode) {
+      var code = String(scanStdout.text || "").trim()
+      if (exitCode === 0 && code) root.connectApp(code)
+      else if (exitCode === 2) root.reportConnect(false, "Camera scan failed: " + String(scanStderr.text || "").trim())
+      else root.statusText = ""
+    }
+  }
+
+  Timer {
+    id: scanTimeout
+    interval: 125000
+    repeat: false
+    onTriggered: scanProcess.running = false
+  }
+
+  Process {
+    id: pasteCodeProcess
+    running: false
+    command: ["wl-paste", "--no-newline", "--type", "text"]
+    stdout: StdioCollector {
+      id: pasteCodeStdout
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      root.connectApp(exitCode === 0 ? pasteCodeStdout.text : "")
     }
   }
 
@@ -998,7 +1137,7 @@ Panel {
                 textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Paste this into a NIP-46 client (Amber, nsec.app, etc.) to request signatures from this signer. Every request still needs your approve/deny below."
+                text: "Paste this into a NIP-46 client (Amber, nsec.app, etc.), or show it as a QR code for a phone app such as Amethyst to scan (login with bunker). Every request still needs your approve/deny below."
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -1010,12 +1149,20 @@ Panel {
 
                 Text {
                   textFormat: Text.PlainText
-                  width: parent.width - copyBunkerButton.width - parent.spacing
+                  width: parent.width - copyBunkerButton.width - bunkerQrButton.width - parent.spacing * 2
                   text: root.bunkerUrl
                   color: root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   elide: Text.ElideMiddle
+                }
+
+                Button {
+                  id: bunkerQrButton
+                  text: root.showBunkerQr ? "Hide QR" : "QR"
+                  foreground: root.foreground
+                  bordered: true
+                  onClicked: root.toggleBunkerQr()
                 }
 
                 Button {
@@ -1027,6 +1174,53 @@ Panel {
                 }
               }
 
+              // Always black on white with a quiet zone, whatever the theme:
+              // phone scanners want a light background and dark modules.
+              Rectangle {
+                visible: root.showBunkerQr && root.bunkerQrSource !== ""
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: Style.space(220)
+                height: width
+                color: "white"
+                radius: Style.space(4)
+
+                Image {
+                  anchors.fill: parent
+                  anchors.margins: Style.space(8)
+                  source: root.showBunkerQr ? root.bunkerQrSource : ""
+                  fillMode: Image.PreserveAspectFit
+                  smooth: false
+                  cache: false
+                }
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Or let the app connect first: when it shows a nostrconnect:// QR code (Amethyst: login with a remote signer), scan it with the camera, or copy the code and paste it."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Row {
+                spacing: Style.space(6)
+                Button {
+                  text: root.scanning ? "Cancel scan" : "Scan QR"
+                  foreground: root.foreground
+                  bordered: true
+                  onClicked: root.scanConnectQr()
+                }
+                Button {
+                  text: "Paste code"
+                  foreground: root.foreground
+                  bordered: true
+                  enabled: !root.busy && !root.scanning
+                  onClicked: root.pasteConnectCode()
+                }
+              }
+
               // --- Pending requests --------------------------------------
               Column {
                 visible: root.pendingList.length > 0
@@ -1034,6 +1228,13 @@ Panel {
                 spacing: Style.space(8)
 
                 PanelSectionHeader { text: "PENDING REQUESTS"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+                Row {
+                  visible: root.pendingList.length > 1
+                  spacing: Style.space(6)
+                  Button { text: "Approve all " + root.pendingList.length; foreground: root.foreground; bordered: true; enabled: !root.busy; onClicked: root.resolveAllPending(true) }
+                  Button { text: "Deny all"; foreground: root.urgent; bordered: true; enabled: !root.busy; onClicked: root.resolveAllPending(false) }
+                }
 
                 Repeater {
                   model: root.pendingList

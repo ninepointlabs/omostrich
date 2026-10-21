@@ -16,7 +16,7 @@ var SUPPORT_EMAIL = "help@ninepointlabs.com"
 // scrypt, 0600), daemon/config.mjs (default relays), daemon/daemon.mjs (NDK
 // is created only on unlock; publish, kind-0 profile lookup, NIP-46 backend,
 // audit log), daemon/notify-watch.mjs (mention/DM/zap subscription),
-// daemon/blossom.mjs (the only fetch()), daemon/control-socket.mjs (0600
+// daemon/nostrconnect.mjs (relays named by a scanned code), daemon/blossom.mjs (the only fetch()), daemon/control-socket.mjs (0600
 // socket, plus token-gated TCP 4737 on the Tailscale address), Panel.qml (profile picture Image), and NDK's default outbox
 // relays (purplepag.es, nos.lol). tests/about.test.mjs fails if a host is
 // added to the code without being named here.
@@ -32,6 +32,11 @@ var PRIVACY = [
     + "default relay.damus.io, relay.primal.net and nos.lol) to answer signing requests from apps you "
     + "approve. Its Nostr library also connects to purplepag.es and nos.lol to look up relay lists, and "
     + "may read your profile from the relays in your published relay list.",
+  "If you connect an app from its nostrconnect:// code (Remote signing, Scan QR or Paste code), the "
+    + "daemon also uses the relays that code names to answer that app, after every unlock, until you "
+    + "revoke it. Scan QR turns on your camera, with a preview in its own window, only until it reads "
+    + "one QR code, you cancel, or two minutes pass. Frames are handed straight to the QR decoder (zbar) "
+    + "on this computer; no picture is saved or sent anywhere.",
   "Notes you publish are public and permanent on those relays. Images you attach are uploaded to the "
     + "Blossom server you configure. The panel loads your profile picture from the address in your "
     + "Nostr profile.",
@@ -43,9 +48,10 @@ var PRIVACY = [
     + "lock it, unlock it with your passphrase, sign, post, approve apps and change relays while it is "
     + "unlocked, and replace the stored key. Delete tcp-token and restart the daemon to issue a new one.",
   "The daemon logs unlocks, each signature and each post (event kind and id, a short content hash, "
-    + "length, relay results), and the sender (first 16 characters of the public key) and relay of each "
-    + "incoming NIP-46 request, to daemon.log in ~/.local/state/omarchy/omostrich/; never your key, your "
-    + "passphrase or a request's content. Settings and your cached profile are in ~/.local/share/omostrich/."
+    + "length, relay results), the sender (first 16 characters of the public key), relay and method "
+    + "(such as sign_event) of each incoming NIP-46 request, and whether the reply was ok or which error "
+    + "it carried, to daemon.log in ~/.local/state/omarchy/omostrich/; never your key, your passphrase, "
+    + "a request's content or what was sent back. Settings and your cached profile are in ~/.local/share/omostrich/."
 ].join("\n\n")
 
 // "0.2.0" from manifest.json's text, or "" when it can't be read.
