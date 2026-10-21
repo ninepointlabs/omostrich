@@ -72,17 +72,36 @@ public, permanent artifact — the event's **kind and a content preview**,
 so approving isn't blind. Three choices per request: **Approve once**,
 **Always allow** (scoped to that exact method for that exact app —
 approving `sign_event` once doesn't also silently hand over
-`get_public_key` forever), or **Deny**. Unanswered requests auto-deny
+`get_public_key` forever), or **Deny**. When several are waiting (an app
+like Amethyst signs a burst of events right after login), **Approve
+all** / **Deny all** settle every request on screen at once, each one
+just this once; one that arrives after you click still waits for its
+own answer. Unanswered requests auto-deny
 after two minutes; a signer should never sit there waiting on you
 indefinitely. Authorized apps and what they've been granted are listed
 and revocable.
 
+**Show the bunker as a QR code.** **QR** next to Copy shows the same
+`bunker://` string as a QR code (black on white, drawn by `qrencode`)
+for a phone app to scan, such as Amethyst's login with a bunker. It's
+the easier direction for a phone: its camera has autofocus, and the
+bunker string is short. The string is public (your pubkey and NIP-46
+relays, no secret), and so is the PNG it's drawn to,
+`~/.local/state/omarchy/omostrich/bunker-qr.png`. The app's connect
+request then shows up for approval like any other.
+
 **Connect an app by QR code (nostrconnect://).** Some apps start the
 connection themselves: Amethyst's "login with a remote signer" shows a
 `nostrconnect://` QR code instead of asking for a `bunker://` string.
-Under Remote signing, **Scan QR** opens your laptop camera (via
-`zbarcam`, in its own preview window) and closes it as soon as it reads
-a QR code, on **Cancel scan**, or after two minutes. **Paste code** does
+Under Remote signing, **Scan QR** opens your laptop camera with a
+mirrored preview window (`bin/scan-qr.mjs`: ffmpeg for the camera,
+ffplay for the preview, zbar for decoding) and closes it as soon as it
+reads a `nostrconnect://` code, when you close the preview or press
+**Cancel scan**, or after two minutes. Hold the phone so the code fills
+the box drawn on the preview, about 25-35 cm away, and keep it still.
+Amethyst's code is dense and laptop webcams are fixed-focus, so each
+frame is enlarged 2x and sharpened before decoding; frames go straight
+to the decoder and are never written to disk. **Paste code** does
 the same with a `nostrconnect://` string you copied. The daemon checks
 the code (hex pubkey, `ws://`/`wss://` relays only, at most 8, a secret
 required) and answers the app on the relays it named, which completes
@@ -214,8 +233,9 @@ write it to that pipe.
 
 ## Install
 
-Requires `zbar` (`zbarcam`) for Scan QR — `sudo pacman -S zbar` if it
-isn't installed; everything else works without it. Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
+The bunker QR needs `qrencode`; Scan QR needs `ffmpeg` (which includes
+`ffplay`) and `zbar` (`sudo pacman -S qrencode ffmpeg zbar` for any that
+are missing); everything else works without them. Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
 `volta`, whatever puts `node` on your `PATH`) and
 [Omarchy](https://omarchy.org).
 
@@ -292,6 +312,7 @@ rm ~/.config/systemd/user/omostrich.service ~/.local/bin/omostrich-ctl
 | Control socket, daemon log, notification dedup state | `~/.local/state/omarchy/omostrich/` |
 | CLI | `omostrich-ctl` (symlinked from `bin/ctl.mjs`) |
 | MCP server (stdio) | `bin/mcp.mjs` — run directly, no symlink needed |
+| QR scanner | `bin/scan-qr.mjs` — run by the panel's Scan QR |
 | systemd unit | `omostrich.service` |
 | Plugin (deployed) | `~/.config/omarchy/plugins/omostrich/` |
 | Plugin id | `tim.omostrich` |

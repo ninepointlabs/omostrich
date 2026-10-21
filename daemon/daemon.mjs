@@ -218,8 +218,10 @@ async function unlockWith(passphrase) {
   // the actual authorization decision still runs through permitCallback via
   // pubkeyAllowed() right after this, same as every other method.
   backend.applyToken = async () => {};
-  // Log every incoming NIP-46 request (sender + relay, never content) so
-  // "the bunker isn't responding" can be told apart from "nothing arrived."
+  // Log every incoming NIP-46 request (sender, relay and method, never
+  // params) and every reply (ok, or the error string, never the result), so
+  // "the bunker isn't responding" can be told apart from "nothing arrived"
+  // and from "it answered with an error."
   // Also drops an event already handled: a relay added by nostrConnect()
   // gets its own subscription on top of backend.start()'s, so one request
   // can arrive twice, and handling it twice would queue two approvals.
@@ -229,8 +231,26 @@ async function unlockWith(passphrase) {
     if (seenRequests.has(event.id)) return;
     seenRequests.add(event.id);
     if (seenRequests.size > 500) seenRequests.delete(seenRequests.values().next().value);
-    log(`nip46 request from ${event.pubkey?.slice(0, 16)} via ${event.relay?.url ?? "unknown relay"}`);
-    return handleIncoming(event);
+    const from = event.pubkey?.slice(0, 16);
+    const via = event.relay?.url ?? "unknown relay";
+    return backend.rpc.parseEvent(event).then(
+      ({ method }) => {
+        log(`nip46 request ${method || "(no method)"} from ${from} via ${via}`);
+        return handleIncoming(event);
+      },
+      (err) => log(`nip46 request from ${from} via ${via}: could not decrypt/parse (${err?.message || err})`),
+    );
+  };
+  const sendResponse = backend.rpc.sendResponse.bind(backend.rpc);
+  backend.rpc.sendResponse = async (id, remotePubkey, result, kind, error) => {
+    const outcome = result === "error" ? `error: ${error}` : "ok";
+    try {
+      await sendResponse(id, remotePubkey, result, kind, error);
+      log(`nip46 reply to ${remotePubkey?.slice(0, 16)}: ${outcome}`);
+    } catch (err) {
+      log(`nip46 reply to ${remotePubkey?.slice(0, 16)} (${outcome}) failed to publish: ${err?.message || err}`);
+      throw err;
+    }
   };
   await backend.start();
 
@@ -684,6 +704,23 @@ async function handleCommand(cmd, req) {
     case "deny":
       resolvePending(req.id, false);
       return { id: req.id, approved: false };
+
+    // Approve all / Deny all in the panel. Takes the ids the panel was
+    // showing, not "everything pending", so a request that arrives between
+    // the click and this command still waits for its own decision. Always
+    // once: no grant is remembered. Ids already gone (timed out) are skipped.
+    case "resolve_many": {
+      if (!Array.isArray(req.ids)) throw new Error("ids must be an array");
+      if (typeof req.approved !== "boolean") throw new Error("approved must be a boolean");
+      let resolved = 0;
+      for (const id of req.ids) {
+        if (!pending.has(id)) continue;
+        resolvePending(id, req.approved);
+        resolved++;
+      }
+      log(`${req.approved ? "approved" : "denied"} ${resolved} pending NIP-46 request(s) at once`);
+      return { resolved, approved: req.approved };
+    }
 
     case "nostrconnect":
       return nostrConnect(req.uri);

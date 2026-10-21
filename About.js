@@ -34,8 +34,9 @@ var PRIVACY = [
     + "may read your profile from the relays in your published relay list.",
   "If you connect an app from its nostrconnect:// code (Remote signing, Scan QR or Paste code), the "
     + "daemon also uses the relays that code names to answer that app, after every unlock, until you "
-    + "revoke it. Scan QR turns on your camera through zbarcam, in its own window, only until it reads "
-    + "one QR code, you cancel, or two minutes pass; no picture is saved or sent anywhere.",
+    + "revoke it. Scan QR turns on your camera, with a preview in its own window, only until it reads "
+    + "one QR code, you cancel, or two minutes pass. Frames are handed straight to the QR decoder (zbar) "
+    + "on this computer; no picture is saved or sent anywhere.",
   "Notes you publish are public and permanent on those relays. Images you attach are uploaded to the "
     + "Blossom server you configure. The panel loads your profile picture from the address in your "
     + "Nostr profile.",
@@ -47,9 +48,10 @@ var PRIVACY = [
     + "lock it, unlock it with your passphrase, sign, post, approve apps and change relays while it is "
     + "unlocked, and replace the stored key. Delete tcp-token and restart the daemon to issue a new one.",
   "The daemon logs unlocks, each signature and each post (event kind and id, a short content hash, "
-    + "length, relay results), and the sender (first 16 characters of the public key) and relay of each "
-    + "incoming NIP-46 request, to daemon.log in ~/.local/state/omarchy/omostrich/; never your key, your "
-    + "passphrase or a request's content. Settings and your cached profile are in ~/.local/share/omostrich/."
+    + "length, relay results), the sender (first 16 characters of the public key), relay and method "
+    + "(such as sign_event) of each incoming NIP-46 request, and whether the reply was ok or which error "
+    + "it carried, to daemon.log in ~/.local/state/omarchy/omostrich/; never your key, your passphrase, "
+    + "a request's content or what was sent back. Settings and your cached profile are in ~/.local/share/omostrich/."
 ].join("\n\n")
 
 // "0.2.0" from manifest.json's text, or "" when it can't be read.
