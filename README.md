@@ -233,9 +233,11 @@ write it to that pipe.
 
 ## Install
 
-The bunker QR needs `qrencode`; Scan QR needs `ffmpeg` (which includes
-`ffplay`) and `zbar` (`sudo pacman -S qrencode ffmpeg zbar` for any that
-are missing); everything else works without them. Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
+The bunker QR needs the `qrencode` package; Scan QR needs `ffmpeg`
+(which includes `ffplay`) and `zbar`. Install any that are missing with
+your package manager; everything else works without them.
+
+Requires Node (any install — system package, `mise`, `nvm`, `fnm`,
 `volta`, whatever puts `node` on your `PATH`) and
 [Omarchy](https://omarchy.org).
 
