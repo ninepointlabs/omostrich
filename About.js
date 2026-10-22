@@ -16,8 +16,9 @@ var SUPPORT_EMAIL = "help@ninepointlabs.com"
 // scrypt, 0600), daemon/config.mjs (default relays), daemon/daemon.mjs (NDK
 // is created only on unlock; publish, kind-0 profile lookup, NIP-46 backend,
 // audit log), daemon/notify-watch.mjs (mention/DM/zap subscription),
-// daemon/nostrconnect.mjs (relays named by a scanned code), daemon/blossom.mjs (the only fetch()), daemon/control-socket.mjs (0600
-// socket, plus token-gated TCP 4737 on the Tailscale address), Panel.qml (profile picture Image), and NDK's default outbox
+// daemon/nostrconnect.mjs (relays named by a scanned code), daemon/blossom.mjs and daemon/avatar.mjs (the only fetch()es:
+// Blossom upload, bounded profile-picture download), daemon/control-socket.mjs (0600
+// socket, plus token-gated TCP 4737 on the Tailscale address), Panel.qml (Images load local files only), and NDK's default outbox
 // relays (purplepag.es, nos.lol). tests/about.test.mjs fails if a host is
 // added to the code without being named here.
 var PRIVACY = [
@@ -38,8 +39,9 @@ var PRIVACY = [
     + "one QR code, you cancel, or two minutes pass. Frames are handed straight to the QR decoder (zbar) "
     + "on this computer; no picture is saved or sent anywhere.",
   "Notes you publish are public and permanent on those relays. Images you attach are uploaded to the "
-    + "Blossom server you configure. The panel loads your profile picture from the address in your "
-    + "Nostr profile.",
+    + "Blossom server you configure. While unlocked, the daemon downloads your profile picture from "
+    + "the address in your Nostr profile (at most 1 MB, PNG, JPEG, GIF or WebP) and keeps a copy in "
+    + "~/.local/share/omostrich/; the panel shows only that copy.",
   "Other programs running as you can use the signer through ~/.local/state/omarchy/omostrich/control.sock "
     + "(mode 0600). When Tailscale is up, the daemon also listens on TCP port 4737 on this computer's "
     + "Tailscale address, for your own devices such as a phone. A device must first send the token kept "

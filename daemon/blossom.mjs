@@ -2,8 +2,12 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { imageInfo, withinDecodeLimits, readBodyCapped } from "./avatar.mjs";
 
 const MAX_BYTES = 25 * 1024 * 1024;
+// A blob descriptor is a few hundred bytes of JSON.
+const MAX_RESPONSE_BYTES = 64 * 1024;
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 export function normalizeBlossomUrl(raw) {
   const s = String(raw ?? "").trim();
@@ -114,9 +118,10 @@ export async function uploadBlob({ ndk, skBytes, pubkeyHex, blossomUrl, req }) {
       "X-SHA-256": sha256,
     },
     body: buf,
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
 
-  const text = await res.text();
+  const text = (await readBodyCapped(res, MAX_RESPONSE_BYTES)).toString("utf8");
   let body = null;
   try {
     body = text ? JSON.parse(text) : null;
@@ -135,6 +140,9 @@ export async function uploadBlob({ ndk, skBytes, pubkeyHex, blossomUrl, req }) {
     sha256: body?.sha256 || sha256,
     size: body?.size || buf.length,
     mime: body?.type || mime,
+    // Whether the panel may preview the local file it uploaded (the same
+    // decode limits as the profile picture). It never loads the remote url.
+    previewable: withinDecodeLimits(imageInfo(buf)),
   };
 }
 

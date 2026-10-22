@@ -106,9 +106,9 @@ test("privacy statement names the Nostr library's own default relays", (t) => {
   assert.doesNotMatch(read("daemon/daemon.mjs"), /enableOutboxModel|outboxRelayUrls/);
 });
 
-test("only the Blossom upload makes HTTP requests, and the panel loads only the named images", () => {
-  const fetchers = sourceFiles().filter((f) => codeLines(f).some((l) => /\bfetch\(/.test(l)));
-  assert.deepEqual(fetchers, [path.join("daemon", "blossom.mjs")]);
+test("only the Blossom upload and the bounded avatar download make HTTP requests, and the panel loads only local images", () => {
+  const fetchers = sourceFiles().filter((f) => codeLines(f).some((l) => /\bfetch(Impl)?\(/.test(l)));
+  assert.deepEqual(fetchers.sort(), [path.join("daemon", "avatar.mjs"), path.join("daemon", "blossom.mjs")]);
   const imageSources = [];
   for (const f of sourceFiles().filter((f) => f.endsWith(".qml"))) {
     for (const l of codeLines(f)) {
@@ -118,12 +118,22 @@ test("only the Blossom upload makes HTTP requests, and the panel loads only the 
   }
   assert.deepEqual(imageSources.sort(), [
     "\"ostrich.png\"", // bar icon, local
-    "(root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : \"\"", // Blossom upload preview
-    "root.profilePicture", // profile picture
+    "root.attachPreview", // upload preview: the local file, file:// only
+    "root.profilePicture", // daemon's bounded local copy, file:// only
     "root.showBunkerQr ? root.bunkerQrSource : \"\"", // bunker QR, local file from qrencode
     "silhouette", // bar icon tint (LockIcon.qml), local
   ]);
   assert.match(About.PRIVACY, /profile picture/);
+  assert.match(About.PRIVACY, /at most 1 MB/);
+  const panel = read("Panel.qml");
+  assert.match(panel, /readonly property string profilePicture: \(root\.profile && \/\^file:/);
+  assert.match(panel, /root\.attachPreview = res\.data\.previewable \? root\.fileUrl\(p, /);
+  // Every Image in the panel has a sourceSize, so decode size is bounded by it.
+  for (const f of ["Panel.qml", "LockIcon.qml"]) {
+    const blocks = read(f).split(/\bImage \{/).slice(1);
+    assert.ok(blocks.length > 0, f);
+    for (const b of blocks) assert.match(b.slice(0, 600), /sourceSize\.width/, `${f}: Image without sourceSize`);
+  }
 });
 
 test("privacy statement matches the vault, socket and log code", () => {
