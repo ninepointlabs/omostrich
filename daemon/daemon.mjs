@@ -5,6 +5,7 @@ import NDK, { NDKEvent, NDKNip46Backend, NDKPrivateKeySigner, NDKRelaySet } from
 import * as vault from "./vault.mjs";
 import * as configStore from "./config.mjs";
 import * as blossom from "./blossom.mjs";
+import { createAvatarCache } from "./avatar.mjs";
 import { createNotifyWatch } from "./notify-watch.mjs";
 import { parseNostrConnectUri } from "./nostrconnect.mjs";
 import { createControlServer } from "./control-socket.mjs";
@@ -44,6 +45,16 @@ const pending = new Map(); // id -> { id, pubkey, method, params, createdAt, res
 // Public kind-0 metadata for this vault's pubkey. Never secret. Loaded from
 // disk cache on boot, refreshed from the relay pool after unlock.
 let profile = null;
+
+// Bounded local copy of profile.picture; the panel only ever loads this.
+// Downloaded only while unlocked, like every other network use.
+const avatar = createAvatarCache(dataDir, { log });
+
+function syncAvatar() {
+  avatar.sync(profile?.picture || "")
+    .then((changed) => { if (changed) broadcastStatus(); })
+    .catch((err) => log(`profile picture: ${err?.message || err}`));
+}
 
 function parseKind0(content) {
   try {
@@ -99,6 +110,7 @@ function profilePayload() {
     name: profile.name || "",
     displayName: profile.displayName || "",
     picture: profile.picture || "",
+    pictureFile: avatar.fileUrl(profile.picture || ""),
     identity: identityLabel(profile, npub),
   };
 }
@@ -128,6 +140,7 @@ async function refreshProfile() {
     saveProfileCache(pubkeyHex, parsed);
     log(`kind-0 profile: ${identityLabel(profile, npub)}`);
     broadcastStatus();
+    syncAvatar();
   } catch (err) {
     log(`kind-0 profile fetch failed: ${err?.message || err}`);
   }
@@ -259,6 +272,7 @@ async function unlockWith(passphrase) {
   const cached = loadProfileCache(pubkeyHex);
   if (cached) profile = cached;
   broadcastStatus();
+  syncAvatar();
   refreshProfile().catch((err) => log(`kind-0 refresh: ${err?.message || err}`));
   notifyWatch.start();
   return { npub, pubkeyHex };

@@ -1,6 +1,6 @@
 {
   "name": "omostrich",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Local Nostr key custody daemon (product name Omostrich): holds an encrypted nsec, signs on request over a Unix socket for first-party Omarchy plugins, and answers NIP-46 remote-signing requests over relays.",

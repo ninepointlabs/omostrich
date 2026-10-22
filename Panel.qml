@@ -72,6 +72,9 @@ Panel {
   property string blossomText: ""
   property string attachPath: ""
   property var attachedBlob: null
+  // file:// URL of the local file just uploaded, when the daemon says it is
+  // small enough to decode; the remote Blossom URL is never loaded.
+  property string attachPreview: ""
   property string pastePath: Quickshell.env("HOME") + "/.local/state/omarchy/omostrich/clipboard.png"
   // True while bin/scan-qr.mjs has the camera open for a nostrconnect:// QR code.
   property bool scanning: false
@@ -128,7 +131,9 @@ Panel {
     if (root.vaultExists && root.npub) return root.shortKey(root.npub)
     return "Omostrich"
   }
-  readonly property string profilePicture: (root.profile && root.profile.picture) ? root.profile.picture : ""
+  // The daemon's bounded local copy (daemon/avatar.mjs), never the remote
+  // URL from the profile itself.
+  readonly property string profilePicture: (root.profile && /^file:\/\//.test(root.profile.pictureFile || "")) ? root.profile.pictureFile : ""
   readonly property bool canPost: !root.locked && root.vaultExists && root.daemonReachable && !root.busy && (root.draft.trim().length > 0 || !!(root.attachedBlob && root.attachedBlob.url))
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -316,6 +321,11 @@ Panel {
 
   function clearAttach() {
     root.attachedBlob = null
+    root.attachPreview = ""
+  }
+
+  function fileUrl(filePath, version) {
+    return "file://" + String(filePath).split("/").map(encodeURIComponent).join("/") + "?v=" + encodeURIComponent(version || "")
   }
 
   function uploadFromPath(filePath) {
@@ -325,6 +335,7 @@ Panel {
     runAction("blossom_upload", { path: p }, function(res) {
       if (res.ok && res.data && res.data.url) {
         root.attachedBlob = res.data
+        root.attachPreview = res.data.previewable ? root.fileUrl(p, res.data.sha256) : ""
         root.statusText = "Uploaded. URL will be added to the note when you post."
       } else {
         root.errorText = describeBlossomError(res.error)
@@ -438,6 +449,7 @@ Panel {
         if (failList.length === 0) {
           root.draft = ""
           root.attachedBlob = null
+          root.attachPreview = ""
           root.statusText = "Posted to " + okCount + " relay" + (okCount === 1 ? "" : "s") + "."
         } else if (okCount === 0) {
           // Nothing succeeded — keep the draft so the user doesn't have to
@@ -446,6 +458,7 @@ Panel {
         } else {
           root.draft = ""
           root.attachedBlob = null
+          root.attachPreview = ""
           root.statusText = "Posted to " + okCount + " of " + total + " relays (" + failList.map(function(f) { return f.url }).join(", ") + " failed)."
         }
       } else {
@@ -781,6 +794,8 @@ Panel {
               Image {
                 anchors.fill: parent
                 source: root.profilePicture
+                sourceSize.width: Style.space(56)
+                sourceSize.height: Style.space(56)
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
               }
@@ -972,16 +987,19 @@ Panel {
                 spacing: Style.space(8)
 
                 Image {
+                  visible: root.attachPreview !== ""
                   width: Style.space(48)
                   height: Style.space(48)
                   fillMode: Image.PreserveAspectFit
-                  source: (root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : ""
+                  source: root.attachPreview
+                  sourceSize.width: Style.space(96)
+                  sourceSize.height: Style.space(96)
                   asynchronous: true
                 }
 
                 Text {
                   textFormat: Text.PlainText
-                  width: parent.width - Style.space(56)
+                  width: parent.width - (root.attachPreview !== "" ? Style.space(56) : 0)
                   wrapMode: Text.WrapAnywhere
                   text: (root.attachedBlob && root.attachedBlob.url) ? root.attachedBlob.url : ""
                   color: root.dim
@@ -1188,6 +1206,8 @@ Panel {
                   anchors.fill: parent
                   anchors.margins: Style.space(8)
                   source: root.showBunkerQr ? root.bunkerQrSource : ""
+                  sourceSize.width: Style.space(408)
+                  sourceSize.height: Style.space(408)
                   fillMode: Image.PreserveAspectFit
                   smooth: false
                   cache: false
