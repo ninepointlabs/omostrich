@@ -8,6 +8,8 @@ import * as blossom from "./blossom.mjs";
 import { createAvatarCache } from "./avatar.mjs";
 import { createNotifyWatch } from "./notify-watch.mjs";
 import { parseNostrConnectUri } from "./nostrconnect.mjs";
+import { createApprovals, migrateClientGrants } from "./approvals.mjs";
+import { installHandlers } from "./nip46-handlers.mjs";
 import { createControlServer } from "./control-socket.mjs";
 import { stateDir, logPath, dataDir, profileCachePath } from "./paths.mjs";
 import path from "node:path";
@@ -28,9 +30,14 @@ import { fileURLToPath } from "node:url";
 // network — a real outage, not something a client library can paper over).
 globalThis.WebSocket = WS;
 
-const PENDING_TIMEOUT_MS = 120_000;
-
 let config = configStore.load();
+
+// Grants saved before sign_event was scoped per kind meant "every kind".
+// They are dropped, not kept, so the app asks again once per kind; see
+// migrateClientGrants() in approvals.mjs.
+const migratedGrants = migrateClientGrants(config.clients);
+for (const pk of migratedGrants) log(`grants: dropped the old all-kinds sign_event grant for ${pk.slice(0, 16)}; it will be asked per kind`);
+if (migratedGrants.length > 0) configStore.save(config);
 
 // In-memory only while unlocked. `lockNow` zeroes and drops this.
 let skBytes = null;
@@ -40,7 +47,13 @@ let ndk = null;
 let backend = null;
 let autoLockTimer = null;
 
-const pending = new Map(); // id -> { id, pubkey, method, params, createdAt, resolve, timer }
+const approvals = createApprovals({
+  getConfig: () => config,
+  saveConfig: (c) => configStore.save(c),
+  broadcast: (event, payload) => server.broadcast(event, payload),
+  onActivity: () => touchActivity(),
+  getSelfPubkey: () => pubkeyHex,
+});
 
 // Public kind-0 metadata for this vault's pubkey. Never secret. Loaded from
 // disk cache on boot, refreshed from the relay pool after unlock.
@@ -216,7 +229,10 @@ async function unlockWith(passphrase) {
     .join(", ");
   log(`post-connect relay states (4s window): ${relayStates}`);
 
-  backend = new NDKNip46Backend(ndk, signer, permitCallback, nip46ListenRelays());
+  backend = new NDKNip46Backend(ndk, signer, approvals.permitCallback, nip46ListenRelays());
+  // Encrypt/decrypt prompts get the peer pubkey; get_public_key needs a
+  // connected or remembered app. See nip46-handlers.mjs.
+  installHandlers(backend, { isKnownClient: approvals.isKnownClient });
   // NDKNip46Backend's default applyToken() throws "connection token not
   // supported" whenever a connect request carries a secret/token param —
   // and the NIP-46 spec's own bunker:// example includes an optional
@@ -229,7 +245,8 @@ async function unlockWith(passphrase) {
   // token-scoped permission grants, so accepting the token as a no-op (not
   // validating it, not rejecting the connection because of it) is correct:
   // the actual authorization decision still runs through permitCallback via
-  // pubkeyAllowed() right after this, same as every other method.
+  // pubkeyAllowed() right after this, same as every other method but
+  // get_public_key for a known app (see nip46-handlers.mjs).
   backend.applyToken = async () => {};
   // Log every incoming NIP-46 request (sender, relay and method, never
   // params) and every reply (ok, or the error string, never the result), so
@@ -284,11 +301,7 @@ function lockNow(reason) {
     clearTimeout(autoLockTimer);
     autoLockTimer = null;
   }
-  for (const req of pending.values()) {
-    clearTimeout(req.timer);
-    req.resolve(false);
-  }
-  pending.clear();
+  approvals.denyAll();
 
   if (skBytes) skBytes.fill(0);
   skBytes = null;
@@ -306,104 +319,6 @@ function lockNow(reason) {
 
   log(`locked (${reason || "manual"})`);
   broadcastStatus();
-}
-
-// NDKNip46Backend's permission hook. Known apps (in config.clients) are
-// auto-approved, but only for methods they were actually granted — see
-// resolvePending's remember handling below (audit item 3: "Always allow"
-// used to grant a pubkey every method forever with a single click).
-// Anything not pre-granted is queued for interactive approve/deny from
-// the panel, and auto-denied if nobody answers in time — a silent signer
-// should never sit there indefinitely waiting on a human.
-
-// Marketplace review (#4458): the preview is attacker-controlled — it is
-// the literal `content` of whatever a remote NIP-46 client asked us to
-// sign, shown BEFORE the user approves. Reduce it to something safe to
-// put in a UI label regardless of what the QML sink does with it:
-//   - collapse all whitespace (newlines/tabs) to single spaces so a
-//     hostile note cannot push the Approve/Deny row off-screen
-//   - strip C0/C1 control chars and Unicode line/paragraph separators
-//   - cap by *code points*, not UTF-16 units, so we never split a
-//     surrogate pair and emit an invalid string
-// The QML side additionally renders it with Text.PlainText so `<`, `&`,
-// `file:` etc. are inert even if this function ever regresses.
-const PREVIEW_MAX = 80;
-function previewText(s) {
-  if (typeof s !== "string" || s === "") return "";
-  const cleaned = s
-    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (cleaned === "") return "";
-  const cps = Array.from(cleaned);
-  return cps.length > PREVIEW_MAX ? cps.slice(0, PREVIEW_MAX).join("") + "…" : cleaned;
-}
-
-async function permitCallback({ id, pubkey, method, params }) {
-  const grantedMethods = config.clients[pubkey]?.methods;
-  if (Array.isArray(grantedMethods) && grantedMethods.includes(method)) {
-    touchActivity();
-    return true;
-  }
-
-  // Audit item 3 (MEDIUM): the pending list used to show only
-  // `pubkey — method`, so approving a sign_event request (the one method
-  // that actually produces a public, permanent artifact) was done blind
-  // — no indication of what would actually be signed. NDK passes the
-  // full NDKEvent as `params` for sign_event specifically (see
-  // sign-event.ts); every other method's params is either absent or not
-  // event-shaped, so this only ever surfaces real content, never
-  // undefined/garbage. Never logged/shown for anything BUT the event
-  // about to be signed — no secret material flows through `params` for
-  // any NIP-46 method.
-  const kind = (params && typeof params === "object" && Number.isInteger(params.kind)) ? params.kind : null;
-  const rawContent = (params && typeof params === "object" && typeof params.content === "string") ? params.content : "";
-  const contentPreview = previewText(rawContent);
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      server.broadcast("pending_resolved", { id, approved: false, reason: "timeout" });
-      resolve(false);
-    }, PENDING_TIMEOUT_MS);
-
-    const entry = { id, pubkey, method, kind, contentPreview, createdAt: new Date().toISOString(), resolve, timer };
-    pending.set(id, entry);
-    server.broadcast("pending_added", { id, pubkey, method, kind, contentPreview, createdAt: entry.createdAt });
-  });
-}
-
-function resolvePending(id, approved, { remember, label } = {}) {
-  const entry = pending.get(id);
-  if (!entry) throw new Error("no such pending request");
-  clearTimeout(entry.timer);
-  pending.delete(id);
-
-  if (approved && remember) {
-    // Audit item 3 (MEDIUM): scoped to the specific method just approved,
-    // not every method forever. "Always allow" on a sign_event request no
-    // longer silently also grants get_public_key/connect/etc. for that
-    // pubkey — each method has to be individually remembered the first
-    // time it's actually requested and approved. Merges into any existing
-    // grant list for that pubkey rather than replacing it, so approving a
-    // second method later adds to, not resets, what's already trusted.
-    const existing = config.clients[entry.pubkey];
-    const methods = Array.isArray(existing?.methods) ? existing.methods.slice() : [];
-    if (!methods.includes(entry.method)) methods.push(entry.method);
-    // Spread keeps a nostrconnect app's relays; its scanned name wins over
-    // the panel's generic "Approved app" label.
-    config.clients[entry.pubkey] = {
-      ...existing,
-      label: existing?.label || label || "Unnamed app",
-      addedAt: existing?.addedAt || new Date().toISOString(),
-      methods,
-    };
-    configStore.save(config);
-  }
-
-  touchActivity();
-  server.broadcast("pending_resolved", { id, approved });
-  entry.resolve(approved);
 }
 
 function status() {
@@ -424,7 +339,7 @@ function status() {
     notificationsEnabled: config.notificationsEnabled !== false,
     autoLockMinutes: config.autoLockMinutes,
     clients: config.clients,
-    pending: [...pending.values()].map((p) => ({ id: p.id, pubkey: p.pubkey, method: p.method, kind: p.kind, contentPreview: p.contentPreview, createdAt: p.createdAt })),
+    pending: approvals.list(),
     profile: profilePayload(),
     bunkerUrl: bunkerUrl(),
     nip46Relays: nip46RelayList(),
@@ -463,9 +378,10 @@ function bunkerUrl() {
 // "login with remote signer") shows a nostrconnect:// QR code, the panel
 // scans it with the camera, and we answer the app's implied `connect` by
 // sending its secret back to its pubkey on its relays. Scanning the code is
-// the user's approval of that connect; every request the app makes after it
-// (get_public_key, sign_event, ...) still goes through permitCallback like
-// any other NIP-46 request.
+// the user's approval of that connect. The app is then a known client, so
+// get_public_key is answered without a prompt (nip46-handlers.mjs); every
+// other request it makes (sign_event, encrypt/decrypt, ...) still goes
+// through permitCallback like any other NIP-46 request.
 async function nostrConnect(uri) {
   if (!skBytes || !ndk || !backend) throw new Error("locked");
   const conn = parseNostrConnectUri(uri);
@@ -705,6 +621,7 @@ async function handleCommand(cmd, req) {
       if (!req.pubkey) throw new Error("pubkey required");
       delete config.clients[req.pubkey];
       configStore.save(config);
+      approvals.forget(req.pubkey);
       return { clients: config.clients };
     }
 
@@ -712,11 +629,11 @@ async function handleCommand(cmd, req) {
       return { pending: status().pending };
 
     case "approve":
-      resolvePending(req.id, true, { remember: !!req.remember, label: req.label });
+      approvals.resolvePending(req.id, true, { remember: !!req.remember, label: req.label });
       return { id: req.id, approved: true };
 
     case "deny":
-      resolvePending(req.id, false);
+      approvals.resolvePending(req.id, false);
       return { id: req.id, approved: false };
 
     // Approve all / Deny all in the panel. Takes the ids the panel was
@@ -728,8 +645,8 @@ async function handleCommand(cmd, req) {
       if (typeof req.approved !== "boolean") throw new Error("approved must be a boolean");
       let resolved = 0;
       for (const id of req.ids) {
-        if (!pending.has(id)) continue;
-        resolvePending(id, req.approved);
+        if (!approvals.has(id)) continue;
+        approvals.resolvePending(id, req.approved);
         resolved++;
       }
       log(`${req.approved ? "approved" : "denied"} ${resolved} pending NIP-46 request(s) at once`);

@@ -80,6 +80,15 @@ in code the user never reads.
 No expiry on grants was added — out of scope for what was asked, and not
 attempted.
 
+**Follow-up (DM QA, 2026-10-26):** `sign_event` grants are now per kind
+(`sign_event:4`); old all-kinds `sign_event` grants are dropped on the
+first start after the upgrade. The logic moved to `daemon/approvals.mjs`.
+Encrypt/decrypt prompts now show the peer (shortened npub) and, for
+encrypt, a plaintext preview, via our own NIP-46 handlers in
+`daemon/nip46-handlers.mjs` (NDK's pass only the payload). Kind 14 and
+1059 signs warn and can't be remembered. `get_public_key` is answered
+without a prompt only for a connected or remembered app.
+
 ## 4. MEDIUM — systemd unit had no hardening, no `LimitCORE=0` — CLOSED
 
 `omostrich.service` (was `omarchy-nostr-signer.service` before the 2026-09-03 product rename)

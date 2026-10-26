@@ -62,7 +62,13 @@ the placeholder shows instead.
   addressed to you and fires a toast (via `notify-send`, picked up by
   Omarchy's own notification service) — content is never decrypted for
   the toast, DMs just say "encrypted message." No history replay, no
-  inbox, no feed — the toast is the whole feature.
+  inbox, no feed — the toast is the whole feature. NIP-17 gift wraps
+  (kind 1059) are backdated by up to two days on purpose, so they're
+  watched from two days back: the ones relays already hold when you
+  unlock are only marked seen, and a new one toasts once when it
+  arrives. A DM that came in while you were locked gets no toast. If
+  `notify-send` can't run, the daemon logs that once and carries on
+  without toasts; it never takes the signer down.
 - **Auto-lock** — same 5m/30m/1h/12h/24h picker as the unlock form, so
   you can change how long you stay unlocked without having to lock and
   re-unlock to do it.
@@ -72,20 +78,40 @@ something's actually pending, so you never miss an approval). Copy your
 `bunker://` connection string straight from here to paste into any
 NIP-46-aware client — Amber, nsec.app, a web app, whatever supports
 Nostr Connect. Every incoming request from an app you haven't already
-trusted shows up here with the method being requested, and — for
-`sign_event` specifically, the one method that actually produces a
-public, permanent artifact — the event's **kind and a content preview**,
-so approving isn't blind. Three choices per request: **Approve once**,
-**Always allow** (scoped to that exact method for that exact app —
-approving `sign_event` once doesn't also silently hand over
-`get_public_key` forever), or **Deny**. When several are waiting (an app
+trusted shows up here with the method being requested, and:
+- for `sign_event`, the event's **kind and a content preview** (no
+  preview for kinds 4, 13 and 1059, whose content is ciphertext; a
+  kind 4 shows who it's to instead);
+- for `nip04_encrypt` / `nip44_encrypt`, **who it's to** (a shortened
+  npub) and a preview of the text being encrypted;
+- for `nip04_decrypt` / `nip44_decrypt`, **who it's from**.
+
+The preview is held in memory for the prompt only; it's never written
+to the log. Three choices per request: **Approve once**, **Always
+allow**, or **Deny**. Always allow is scoped to that exact method for
+that exact app, and for `sign_event` to that exact **kind**: the button
+says "Always allow sign kind 4 (DM)", and that grant doesn't let the app
+post a note (kind 1) or change your profile (kind 0) without asking.
+A request to sign a kind 14 (a NIP-17 rumor, which must stay unsigned)
+or a kind 1059 (a gift wrap, which must be signed by a one-time key,
+not yours) shows a warning, and can only be approved once, never
+always. When several are waiting (an app
 like Amethyst signs a burst of events right after login), **Approve
 all** / **Deny all** settle every request on screen at once, each one
 just this once; one that arrives after you click still waits for its
 own answer. Unanswered requests auto-deny
 after two minutes; a signer should never sit there waiting on you
 indefinitely. Authorized apps and what they've been granted are listed
-and revocable.
+and revocable. `get_public_key` is answered without a prompt only for an
+app you've approved a `connect` from (since the daemon started) or that
+is under Authorized apps; anyone else asking gets a prompt.
+
+**Upgrading from 0.3.1 or earlier:** a saved `sign_event` grant used to
+mean every kind. The first time the daemon starts after the upgrade, it
+removes those grants (the app and its other grants stay, and the log
+says which apps) because there's no way to tell which kind you meant
+when you approved it. The app asks again, once per kind, and Always
+allow then saves `sign_event:<kind>`, for example `sign_event:4`.
 
 **Show the bunker as a QR code.** **QR** next to Copy shows the same
 `bunker://` string as a QR code (black on white, drawn by `qrencode`)
@@ -238,10 +264,16 @@ write it to that pipe.
   check (`daemon/avatar.mjs`); an attachment preview shows the local
   file you uploaded, never the Blossom URL. The Blossom upload's
   response is capped at 64 KB.
-- **NIP-46 approvals are per-app, per-method, and never blind for the
-  method that matters.** Approving one thing doesn't silently approve
-  everything, and you can always see what you're actually signing
-  before you say yes.
+- **NIP-46 approvals are per-app, per-method (per-kind for
+  `sign_event`), and never blind.** Approving one thing doesn't silently
+  approve everything, and you can always see what you're signing, and
+  who you're encrypting to or decrypting from, before you say yes.
+- **Known gap: an app that never connected can still raise prompts.**
+  The bunker string carries no secret, so anyone who knows your pubkey
+  and NIP-46 relays can queue approval requests (they're auto-denied
+  after two minutes). Requiring `connect` first would lock out apps you
+  approved once before a daemon restart, which don't send `connect`
+  again. Deny anything you don't recognize.
 
 ## Install
 
@@ -324,6 +356,13 @@ rm ~/.config/systemd/user/omostrich.service ~/.local/bin/omostrich-ctl
 | Daemon source | `daemon/` (`nostrconnect.mjs` parses scanned QR codes) |
 | Encrypted vault + config + profile cache + profile picture copy | `~/.local/share/omostrich/` |
 | Control socket, daemon log, notification dedup state | `~/.local/state/omarchy/omostrich/` |
+
+These paths are always under your home directory; `XDG_DATA_HOME` and
+`XDG_STATE_HOME` are ignored. The panel, the About page and the systemd
+unit's `ReadWritePaths` use the same fixed paths, so the daemon moving
+on its own would split them up. To run a second, isolated instance (for
+testing), give it a different `HOME`; setting the XDG variables alone
+still points at your real vault.
 | CLI | `omostrich-ctl` (symlinked from `bin/ctl.mjs`) |
 | MCP server (stdio) | `bin/mcp.mjs` — run directly, no symlink needed |
 | QR scanner | `bin/scan-qr.mjs` — run by the panel's Scan QR |
@@ -528,7 +567,12 @@ Checks the About page's facts against the real `manifest.json`,
 relay and host in the code (and NDK's own default relays), and that
 the panel's Images load only local files. `tests/avatar.test.mjs` runs
 the profile-picture downloader against a local HTTP server (size cap,
-timeout, type and dimension checks). They read source files only; no
+timeout, type and dimension checks). `tests/approvals.test.mjs` covers
+per-kind `sign_event` grants and their migration, what encrypt/decrypt
+prompts show (with throwaway keys generated in the test), the kind 14 /
+1059 warning, and `get_public_key` for unknown apps.
+`tests/notify-watch.test.mjs` checks that a `notify-send` that can't run
+doesn't crash anything, and the gift-wrap window. They read source files only; no
 vault, daemon, socket or relay is touched.
 
 ## License

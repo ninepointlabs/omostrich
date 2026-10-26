@@ -355,6 +355,14 @@ Panel {
     pickProcess.running = true
   }
 
+  function grantSummary(methods) {
+    if (!methods || methods.length === 0) return "Nothing always allowed"
+    return "Always: " + methods.map(function(m) {
+      var k = /^sign_event:(\d+)$/.exec(m)
+      return k ? "sign kind " + k[1] : m
+    }).join(", ")
+  }
+
   function approve(id, remember) {
     runAction("approve", { id: id, remember: remember, label: "Approved app" }, function(res) { root.refreshStatus() })
   }
@@ -1274,13 +1282,26 @@ Panel {
                       elide: Text.ElideRight
                     }
 
-                    // Audit item 3 (MEDIUM): only ever populated for
-                    // sign_event (the one method that produces a public,
-                    // permanent artifact) — see permitCallback's own
-                    // comment in daemon.mjs. Approving anything else
-                    // (connect/get_public_key/ping/switch_relays) never
-                    // had content to preview in the first place, so this
-                    // row simply doesn't render for those.
+                    // Who an encrypt/decrypt (or a kind 4 DM signature) is
+                    // to or from, as a shortened npub. Set by
+                    // describeRequest() in daemon/approvals.mjs.
+                    Text {
+                      textFormat: Text.PlainText
+                      visible: !!modelData.peer
+                      width: parent.width
+                      text: (modelData.peerRole || "with") + " " + (modelData.peer || "")
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
+                    }
+
+                    // Audit item 3 (MEDIUM): populated for sign_event (the
+                    // event's content, unless it's ciphertext) and for
+                    // nip04/nip44 encrypt (the plaintext about to be
+                    // encrypted), never for anything else — see
+                    // describeRequest() in daemon/approvals.mjs. Never
+                    // logged by the daemon.
                     //
                     // Marketplace review (#4458): this string is attacker-
                     // controlled (a stranger's unsigned note body) and is
@@ -1306,14 +1327,29 @@ Panel {
                       font.italic: true
                     }
 
+                    // Kind 14 rumors and kind 1059 gift wraps should never
+                    // be signed with your key (QA bug 4). The daemon says
+                    // why here and won't remember a grant for them.
+                    Text {
+                      textFormat: Text.PlainText
+                      visible: !!modelData.warning
+                      width: parent.width
+                      wrapMode: Text.WordWrap
+                      text: "⚠ " + (modelData.warning || "")
+                      color: root.urgent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+
                     Row {
                       spacing: Style.space(6)
                       Button { text: "Approve once"; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, false) }
-                      // Audit item 3 (MEDIUM): scoped to this one method
-                      // now, not every method forever — label says so
-                      // plainly rather than leaving that a surprise
-                      // buried in daemon.mjs. See resolvePending() there.
-                      Button { text: "Always allow " + modelData.method; foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, true) }
+                      // Audit item 3 (MEDIUM): scoped to this one method,
+                      // and for sign_event to this one kind ("Always allow
+                      // sign kind 4 (DM)"), never every kind — the label
+                      // says so plainly. See resolvePending() in
+                      // daemon/approvals.mjs.
+                      Button { visible: modelData.rememberable !== false; text: "Always allow " + (modelData.grantLabel || modelData.method); foreground: root.foreground; bordered: true; onClicked: root.approve(modelData.id, true) }
                       Button { text: "Deny"; foreground: root.urgent; bordered: true; onClicked: root.deny(modelData.id) }
                     }
                   }
@@ -1335,14 +1371,30 @@ Panel {
                     width: column.width
                     spacing: Style.space(8)
 
-                    Text {
-                      textFormat: Text.PlainText
+                    Column {
                       width: parent.width - revokeButton.width - Style.space(8)
-                      text: (root.clients[modelData].label || "Unnamed app") + " — " + root.shortKey(modelData)
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      elide: Text.ElideRight
+
+                      Text {
+                        textFormat: Text.PlainText
+                        width: parent.width
+                        text: (root.clients[modelData].label || "Unnamed app") + " — " + root.shortKey(modelData)
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        elide: Text.ElideRight
+                      }
+
+                      // What "Always allow" has granted it. sign_event
+                      // grants are per kind ("sign_event:4").
+                      Text {
+                        textFormat: Text.PlainText
+                        width: parent.width
+                        text: root.grantSummary(root.clients[modelData].methods)
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
                     }
 
                     Button {
