@@ -47,7 +47,9 @@ network round-trip every time. A circular profile picture shows up too,
 if your kind-0 has one. The panel never loads that URL itself: the
 daemon downloads it (after unlock only, 10 s timeout, at most 1 MB,
 PNG/JPEG/GIF/WebP by both `Content-Type` and file signature, at most
-2048×2048 by the file header) and keeps `avatar.<ext>` in
+2048×2048 by the file header), strips it down to what drawing it
+needs (no text, ICC, EXIF or XMP metadata, first frame only; animated
+WebP is skipped) and keeps that as `avatar.<ext>` in
 `~/.local/share/omostrich/`; the panel loads that file with a small
 `sourceSize`. A picture that fails any check is skipped (logged) and
 the placeholder shows instead.
@@ -235,7 +237,8 @@ write it to that pipe.
 - **The shell never loads a remote image.** Every `Image` in the QML
   loads a local file with a bounded `sourceSize`. The profile picture
   is fetched by the daemon with a byte cap, timeout and type/dimension
-  check (`daemon/avatar.mjs`); an attachment preview shows the local
+  check, and cached with its metadata stripped, since Qt decodes PNG
+  text chunks before `sourceSize` applies (`daemon/avatar.mjs`); an attachment preview shows the local
   file you uploaded, never the Blossom URL. The Blossom upload's
   response is capped at 64 KB.
 - **NIP-46 approvals are per-app, per-method, and never blind for the
@@ -528,7 +531,7 @@ Checks the About page's facts against the real `manifest.json`,
 relay and host in the code (and NDK's own default relays), and that
 the panel's Images load only local files. `tests/avatar.test.mjs` runs
 the profile-picture downloader against a local HTTP server (size cap,
-timeout, type and dimension checks). They read source files only; no
+timeout, type and dimension checks, metadata stripping for each format). They read source files only; no
 vault, daemon, socket or relay is touched.
 
 ## License
