@@ -40,8 +40,8 @@ var PRIVACY = [
     + "on this computer; no picture is saved or sent anywhere.",
   "Notes you publish are public and permanent on those relays. Images you attach are uploaded to the "
     + "Blossom server you configure. While unlocked, the daemon downloads your profile picture from "
-    + "the address in your Nostr profile (at most 1 MB, PNG, JPEG, GIF or WebP) and keeps a copy in "
-    + "~/.local/share/omostrich/; the panel shows only that copy.",
+    + "the address in your Nostr profile (at most 1 MB, PNG, JPEG, GIF or WebP) and keeps a copy, without its "
+    + "metadata, in ~/.local/share/omostrich/; the panel shows only that copy.",
   "Other programs running as you can use the signer through ~/.local/state/omarchy/omostrich/control.sock "
     + "(mode 0600). When Tailscale is up, the daemon also listens on TCP port 4737 on this computer's "
     + "Tailscale address, for your own devices such as a phone. A device must first send the token kept "

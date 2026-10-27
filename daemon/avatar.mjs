@@ -7,7 +7,8 @@ import { pathToFileURL } from "node:url";
 // anywhere. The panel runs inside the shared Omarchy shell, so it never
 // loads that URL itself: the daemon downloads it here with a byte cap and a
 // timeout, checks it is a PNG/JPEG/GIF/WebP whose header dimensions are
-// small enough to decode cheaply, and keeps a local copy the panel loads
+// small enough to decode cheaply, rewrites it down to the parts needed to
+// draw it (stripImage below), and keeps that local copy for the panel to load
 // via file:// (with a small sourceSize on top). Anything that fails a check
 // leaves no picture, so the panel shows its placeholder.
 export const MAX_AVATAR_BYTES = 1024 * 1024;
@@ -77,6 +78,173 @@ export function withinDecodeLimits(info) {
     && info.width * info.height <= MAX_AVATAR_PIXELS;
 }
 
+// Metadata is decoded before sourceSize applies (libpng inflates every
+// zTXt/iTXt/iCCP chunk as Qt reads the header), so the cached copy keeps
+// only what drawing the first frame needs. Each function returns a new
+// buffer or throws if the structure is malformed or unsupported.
+
+// PNG: the critical chunks plus fixed-size colour hints. Every text, ICC,
+// EXIF, APNG and private chunk is dropped; an unknown critical chunk is
+// refused, as is anything after IEND.
+const PNG_KEEP = new Set(["IHDR", "PLTE", "tRNS", "gAMA", "cHRM", "sRGB", "IDAT", "IEND"]);
+
+function stripPng(buf) {
+  const out = [buf.subarray(0, 8)];
+  let i = 8;
+  let idat = false;
+  for (;;) {
+    if (i + 12 > buf.length) throw new Error("PNG is truncated");
+    const len = buf.readUInt32BE(i);
+    const end = i + 12 + len;
+    if (len > 0x7fffffff || end > buf.length) throw new Error("PNG is truncated");
+    const type = buf.subarray(i + 4, i + 8).toString("latin1");
+    if (!/^[A-Za-z]{4}$/.test(type)) throw new Error("PNG has a malformed chunk");
+    if ((i === 8) !== (type === "IHDR")) throw new Error("PNG does not start with IHDR");
+    if (PNG_KEEP.has(type)) {
+      out.push(buf.subarray(i, end));
+      if (type === "IDAT") idat = true;
+    } else if (type[0] >= "A" && type[0] <= "Z") {
+      throw new Error(`PNG has an unsupported critical chunk ${type}`);
+    }
+    i = end;
+    if (type === "IEND") break;
+  }
+  if (!idat) throw new Error("PNG has no image data");
+  return Buffer.concat(out);
+}
+
+// JPEG: drops COM and every APPn but APP0 (JFIF) and APP14 (Adobe, which
+// says how to convert the colours), and anything after EOI.
+function stripJpeg(buf) {
+  const out = [buf.subarray(0, 2)];
+  let i = 2;
+  let scanned = false;
+  while (i < buf.length) {
+    if (buf[i] !== 0xff) throw new Error("JPEG has a malformed segment");
+    const marker = buf[i + 1];
+    if (marker === 0xff) { i += 1; continue; }
+    if (marker === 0xd9) break;
+    if (marker === undefined || marker === 0x00 || marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+      throw new Error("JPEG has a malformed segment");
+    }
+    if (i + 4 > buf.length) throw new Error("JPEG is truncated");
+    const len = buf.readUInt16BE(i + 2);
+    let end = i + 2 + len;
+    if (len < 2 || end > buf.length) throw new Error("JPEG is truncated");
+    if (marker === 0xda) {
+      // Entropy-coded data runs to the next marker that is not a stuffed
+      // 0xFF00 or a restart marker.
+      scanned = true;
+      while (end < buf.length) {
+        if (buf[end] === 0xff && end + 1 < buf.length) {
+          const next = buf[end + 1];
+          if (next !== 0x00 && !(next >= 0xd0 && next <= 0xd7)) break;
+          end += 2;
+        } else {
+          end += 1;
+        }
+      }
+    }
+    const isApp = marker >= 0xe0 && marker <= 0xef;
+    if (!(marker === 0xfe || (isApp && marker !== 0xe0 && marker !== 0xee))) out.push(buf.subarray(i, end));
+    i = end;
+  }
+  if (!scanned) throw new Error("JPEG has no image data");
+  out.push(Buffer.from([0xff, 0xd9]));
+  return Buffer.concat(out);
+}
+
+// GIF: the first frame and its graphic control block only; comment,
+// application (looping) and plain-text extensions and later frames go.
+function stripGif(buf) {
+  const need = (n) => { if (n > buf.length) throw new Error("GIF is truncated"); };
+  need(13);
+  const packed = buf[10];
+  let i = 13 + (packed & 0x80 ? 3 << ((packed & 7) + 1) : 0);
+  need(i);
+  const out = [buf.subarray(0, i)];
+  const skipBlocks = (j) => {
+    for (;;) {
+      need(j + 1);
+      const n = buf[j];
+      j += 1 + n;
+      if (n === 0) return j;
+    }
+  };
+  let control = null;
+  for (;;) {
+    need(i + 1);
+    const block = buf[i];
+    if (block === 0x21) {
+      need(i + 2);
+      const end = skipBlocks(i + 2);
+      if (buf[i + 1] === 0xf9) control = buf.subarray(i, end);
+      i = end;
+    } else if (block === 0x2c) {
+      need(i + 10);
+      const local = buf[i + 9];
+      let j = i + 10 + (local & 0x80 ? 3 << ((local & 7) + 1) : 0);
+      need(j + 1);
+      j = skipBlocks(j + 1); // LZW minimum code size, then the data
+      if (control) out.push(control);
+      out.push(buf.subarray(i, j), Buffer.from([0x3b]));
+      return Buffer.concat(out);
+    } else {
+      throw new Error("GIF has no image");
+    }
+  }
+}
+
+// WebP: a still image only (VP8 or VP8L, with ALPH under VP8X); ICCP, EXIF,
+// XMP and unknown chunks go and their VP8X flags are cleared. Animated
+// WebP is refused.
+function stripWebp(buf) {
+  // Bytes past the RIFF size are not part of the file.
+  const limit = Math.min(buf.length, 8 + buf.readUInt32LE(4));
+  const chunks = [];
+  let i = 12;
+  while (i + 8 <= limit) {
+    const type = buf.subarray(i, i + 4).toString("latin1");
+    const len = buf.readUInt32LE(i + 4);
+    const end = i + 8 + len + (len & 1);
+    if (i + 8 + len > limit) throw new Error("WebP is truncated");
+    chunks.push({ type, chunk: buf.subarray(i, Math.min(end, limit)) });
+    i = end;
+  }
+  const kept = [];
+  const first = chunks[0]?.type;
+  if (first === "VP8X") {
+    const vp8x = Buffer.from(chunks[0].chunk);
+    if (vp8x.length < 18 || vp8x[8] & 0x02) throw new Error("animated WebP is not supported");
+    vp8x[8] &= 0x10; // alpha only
+    kept.push(vp8x);
+    for (const c of chunks.slice(1)) {
+      if (c.type === "ALPH" || c.type === "VP8 " || c.type === "VP8L") kept.push(c.chunk);
+    }
+  } else if (first === "VP8 " || first === "VP8L") {
+    kept.push(chunks[0].chunk);
+  }
+  const frames = kept.filter((c) => /^VP8[ L]$/.test(c.subarray(0, 4).toString("latin1")));
+  if (frames.length !== 1) throw new Error("WebP has no single image");
+  // Each chunk is padded to even length; the final one may not have been.
+  const body = Buffer.concat(kept.map((c) => (c.length & 1 ? Buffer.concat([c, Buffer.alloc(1)]) : c)));
+  const head = Buffer.from("RIFF\0\0\0\0WEBP", "latin1");
+  head.writeUInt32LE(body.length + 4, 4);
+  return Buffer.concat([head, body]);
+}
+
+// Returns a copy of buf (whose type imageInfo() reported as mime) holding
+// only what is needed to draw it, or throws.
+export function stripImage(buf, mime) {
+  switch (mime) {
+    case "image/png": return stripPng(buf);
+    case "image/jpeg": return stripJpeg(buf);
+    case "image/gif": return stripGif(buf);
+    case "image/webp": return stripWebp(buf);
+    default: throw new Error(`cannot strip ${mime}`);
+  }
+}
+
 // Reads a fetch() Response body, giving up (and cancelling the stream) once
 // it passes maxBytes. Content-Length is checked first but not trusted.
 export async function readBodyCapped(res, maxBytes) {
@@ -104,7 +272,7 @@ export async function readBodyCapped(res, maxBytes) {
 
 // Downloads url and returns { buf, mime, ext, width, height }, or throws
 // with the reason. Both the header and the bytes must say it is an allowed
-// image type.
+// image type; buf is the stripped copy (stripImage), not the bytes served.
 export async function downloadAvatar(url, { fetchImpl = fetch, timeoutMs = AVATAR_TIMEOUT_MS, maxBytes = MAX_AVATAR_BYTES } = {}) {
   let parsed;
   try {
@@ -128,17 +296,22 @@ export async function downloadAvatar(url, { fetchImpl = fetch, timeoutMs = AVATA
     await res.body?.cancel().catch(() => {});
     throw new Error(`content type ${type || "(none)"} is not PNG, JPEG, GIF or WebP`);
   }
-  const buf = await readBodyCapped(res, maxBytes);
-  const info = imageInfo(buf);
+  const raw = await readBodyCapped(res, maxBytes);
+  const info = imageInfo(raw);
   if (!info) throw new Error("not a readable PNG, JPEG, GIF or WebP file");
   if (!withinDecodeLimits(info)) {
     throw new Error(`image is ${info.width}x${info.height} (max ${MAX_AVATAR_SIDE}x${MAX_AVATAR_SIDE})`);
   }
+  const buf = stripImage(raw, info.mime);
   return { buf, mime: info.mime, ext: ALLOWED_TYPES.get(info.mime), width: info.width, height: info.height };
 }
 
 // Local copy of the current profile picture: <dir>/avatar.<ext>, described
-// by <dir>/avatar.json ({ url, file, sha256 }) so a restart doesn't refetch.
+// by <dir>/avatar.json ({ url, file, sha256, version }) so a restart doesn't
+// refetch. A copy from an older version (before stripImage) is ignored and
+// fetched again.
+const CACHE_VERSION = 2;
+
 export function createAvatarCache(dir, { log = () => {}, download = downloadAvatar } = {}) {
   const metaPath = path.join(dir, "avatar.json");
   let current = null;
@@ -147,7 +320,7 @@ export function createAvatarCache(dir, { log = () => {}, download = downloadAvat
 
   try {
     const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
-    if (meta && typeof meta.url === "string" && typeof meta.file === "string" && typeof meta.sha256 === "string"
+    if (meta && meta.version === CACHE_VERSION && typeof meta.url === "string" && typeof meta.file === "string" && typeof meta.sha256 === "string"
         && path.dirname(meta.file) === dir && fs.existsSync(meta.file)) {
       current = meta;
     }
@@ -179,7 +352,7 @@ export function createAvatarCache(dir, { log = () => {}, download = downloadAvat
       fs.renameSync(tmp, file);
       removeFiles(file);
       const sha256 = crypto.createHash("sha256").update(img.buf).digest("hex");
-      current = { url, file, sha256 };
+      current = { url, file, sha256, version: CACHE_VERSION };
       fs.writeFileSync(metaPath, JSON.stringify(current, null, 2) + "\n", { mode: 0o600 });
       log(`profile picture cached (${img.mime}, ${img.width}x${img.height}, ${img.buf.length} bytes)`);
       return true;
