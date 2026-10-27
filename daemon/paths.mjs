@@ -1,6 +1,10 @@
 import os from "node:os";
 import path from "node:path";
 
+// Always under HOME. XDG_DATA_HOME / XDG_STATE_HOME are deliberately not
+// read: Panel.qml, About.js and omostrich.service's ReadWritePaths use these
+// same fixed paths, and an existing vault must keep being found where it is.
+// A separate HOME is what isolates a test instance.
 const home = os.homedir();
 
 export const dataDir = path.join(home, ".local", "share", "omostrich");
