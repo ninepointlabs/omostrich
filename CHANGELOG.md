@@ -3,7 +3,7 @@
 Earlier versions are described on the
 [GitHub releases page](https://github.com/ninepointlabs/omostrich/releases).
 
-## Unreleased
+## 0.3.3 — 2026-10-27
 
 - **"Always allow" for `sign_event` is now per kind** (`sign_event:4`),
   so a DM grant no longer signs kind 1 notes or kind 0 profile changes

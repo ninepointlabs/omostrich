@@ -108,7 +108,7 @@ and revocable. `get_public_key` is answered without a prompt only for an
 app you've approved a `connect` from (since the daemon started) or that
 is under Authorized apps; anyone else asking gets a prompt.
 
-**Upgrading from 0.3.1 or earlier:** a saved `sign_event` grant used to
+**Upgrading from 0.3.2 or earlier:** a saved `sign_event` grant used to
 mean every kind. The first time the daemon starts after the upgrade, it
 removes those grants (the app and its other grants stay, and the log
 says which apps) because there's no way to tell which kind you meant
