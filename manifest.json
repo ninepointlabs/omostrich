@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tim.omostrich",
   "name": "Omostrich",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "author": "Nine Point Labs",
   "description": "Local Nostr signer and note composer for Omarchy. One bar chip to unlock your locally encrypted Nostr key, compose and post kind-1 notes, approve NIP-46 signing requests from other Nostr apps, and manage relays and authorized apps. Plus a compose-only hotkey overlay (SUPER + N). Not a feed or client; your private key never leaves the local vault.",
   "kinds": [
